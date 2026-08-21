@@ -1,0 +1,1760 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gravity Sim, Explained</title>
+<style>
+/* ============================================================
+   Design tokens. Dark-first on purpose: the app this page
+   explains is literally a white square on a black window, and
+   the page lives in that same world. CPU-side ideas are GOLD,
+   GPU-side ideas are BLUE — consistently, in every diagram,
+   tag and table of this document.
+   ============================================================ */
+:root{
+  --bg:#0b0e14;          /* page ground — near-black, cool blue bias */
+  --bg-soft:#0e1220;
+  --panel:#131826;       /* raised cards */
+  --panel-deep:#0a0d15;  /* code blocks — darker than the page */
+  --line:#242c40;        /* hairlines */
+  --ink:#e7eaf2;         /* body text */
+  --muted:#9aa3b8;       /* secondary text */
+  --faint:#606a80;       /* tertiary */
+  --gold:#f2c94c;        /* CPU / Rust side */
+  --gold-soft:#f2c94c33;
+  --blue:#7fb4ff;        /* GPU side */
+  --blue-soft:#7fb4ff2e;
+  --teal:#7bd8d2;        /* "why" asides + function names */
+  --violet:#c9a0f0;      /* keywords */
+  --green:#a8d8a0;       /* strings */
+  --orange:#ffa45e;      /* attributes / decorators */
+  --red:#f08a8a;
+  --mono:"Cascadia Code","Cascadia Mono",Consolas,"JetBrains Mono",ui-monospace,monospace;
+  --sans:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Helvetica Neue",sans-serif;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+body{
+  margin:0;background:var(--bg);color:var(--ink);
+  font-family:var(--sans);font-size:16.5px;line-height:1.65;
+}
+/* ---------- layout: fixed sidebar + reading column ---------- */
+.wrap{display:grid;grid-template-columns:280px minmax(0,1fr);min-height:100vh}
+nav.toc{
+  position:sticky;top:0;height:100vh;overflow-y:auto;
+  border-right:1px solid var(--line);background:var(--bg-soft);
+  padding:28px 20px 40px;scrollbar-width:thin;
+}
+main{max-width:980px;padding:0 48px 120px;margin:0 auto;width:100%}
+@media (max-width:920px){
+  .wrap{grid-template-columns:1fr}
+  nav.toc{position:static;height:auto;border-right:none;border-bottom:1px solid var(--line)}
+  main{padding:0 20px 80px}
+}
+/* ---------- sidebar ---------- */
+.toc .brand{font-family:var(--mono);font-size:15px;letter-spacing:.08em;line-height:1.5;margin-bottom:6px}
+.toc .brand b{color:var(--gold);font-weight:600}
+.toc .brand span{color:var(--muted)}
+.toc .sub{font-size:12.5px;color:var(--faint);margin-bottom:22px}
+.toc ol{list-style:none;margin:0;padding:0;font-size:13.5px}
+.toc li{margin:2px 0}
+.toc a{
+  display:flex;gap:10px;color:var(--muted);text-decoration:none;
+  padding:5px 8px;border-radius:6px;border-left:2px solid transparent;
+}
+.toc a .n{font-family:var(--mono);font-size:11.5px;color:var(--faint);min-width:20px;padding-top:2px}
+.toc a:hover{color:var(--ink);background:var(--panel)}
+.toc a.active{color:var(--gold);border-left-color:var(--gold);background:var(--panel)}
+.toc .legend{margin-top:26px;padding-top:18px;border-top:1px solid var(--line);font-size:12px;color:var(--faint)}
+.toc .legend .chip{display:inline-block;padding:1px 8px;border-radius:99px;font-family:var(--mono);font-size:10.5px;margin:2px 4px 2px 0}
+/* ---------- hero ---------- */
+header.hero{padding:64px 0 26px;border-bottom:1px solid var(--line);margin-bottom:14px}
+.hero .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.22em;color:var(--gold);text-transform:uppercase;margin-bottom:14px}
+.hero h1{font-family:var(--mono);font-weight:600;font-size:clamp(30px,5vw,46px);line-height:1.12;margin:0 0 18px;text-wrap:balance}
+.hero p.lede{font-size:18.5px;color:var(--muted);max-width:62ch;margin:0 0 8px}
+.hero .demo{
+  margin:30px 0 8px;display:flex;align-items:center;justify-content:center;
+  background:#000;border:1px solid var(--line);border-radius:10px;height:200px;position:relative;
+}
+.hero .demo .sq{width:84px;height:84px;background:#fff}
+.hero .demo .cap{position:absolute;bottom:10px;right:14px;font-family:var(--mono);font-size:11px;color:#555}
+/* ---------- chapters ---------- */
+section.ch{padding:48px 0 8px;border-bottom:1px solid var(--line)}
+section.ch:last-of-type{border-bottom:none}
+.chhead{display:flex;align-items:baseline;gap:16px;margin-bottom:14px}
+.chhead .n{font-family:var(--mono);font-size:15px;color:var(--gold);letter-spacing:.06em}
+.chhead h2{font-family:var(--mono);font-weight:600;font-size:25px;margin:0;text-wrap:balance}
+h3{font-family:var(--mono);font-weight:600;font-size:18px;margin:34px 0 10px;color:var(--ink)}
+h4{font-family:var(--mono);font-weight:600;font-size:15px;margin:26px 0 8px}
+p{max-width:72ch}
+li{max-width:70ch}
+strong{color:#fff}
+em{color:var(--muted)}
+hr{border:none;border-top:1px solid var(--line);margin:34px 0}
+/* file path chips */
+.file{
+  font-family:var(--mono);font-size:.85em;background:var(--panel);
+  border:1px solid var(--line);border-radius:6px;padding:1px 7px;white-space:nowrap;
+}
+/* side tags: CPU vs GPU */
+.side{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;border-radius:99px;padding:1.5px 9px;vertical-align:2px}
+.side.cpu{color:var(--gold);background:var(--gold-soft)}
+.side.gpu{color:var(--blue);background:var(--blue-soft)}
+/* inline code */
+code{font-family:var(--mono);font-size:.88em}
+p code,li code,td code,dd code,summary code{
+  background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:.08em .35em;
+}
+/* glossary term links */
+a{color:var(--blue)}
+a.t{
+  color:var(--ink);text-decoration:none;
+  border-bottom:1px dotted var(--faint);cursor:help;
+}
+a.t:hover{color:var(--gold);border-bottom-color:var(--gold)}
+/* ---------- callout asides ---------- */
+.aside{
+  margin:20px 0;padding:14px 18px 12px;background:var(--panel);
+  border:1px solid var(--line);border-left-width:3px;border-radius:8px;max-width:76ch;
+}
+.aside p{margin:8px 0}
+.aside .tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase}
+.aside.rust{border-left-color:var(--gold)} .aside.rust .tag{color:var(--gold)}
+.aside.gpu{border-left-color:var(--blue)} .aside.gpu .tag{color:var(--blue)}
+.aside.why{border-left-color:var(--teal)} .aside.why .tag{color:var(--teal)}
+.aside.warn{border-left-color:var(--red)} .aside.warn .tag{color:var(--red)}
+/* ---------- code figures ---------- */
+figure.code{margin:22px 0;max-width:100%}
+figure.code figcaption{
+  font-family:var(--mono);font-size:12px;color:var(--muted);
+  background:var(--panel);border:1px solid var(--line);border-bottom:none;
+  border-radius:10px 10px 0 0;padding:8px 14px;
+}
+figure.code figcaption .lang{float:right;color:var(--faint)}
+figure.code pre{
+  margin:0;background:var(--panel-deep);border:1px solid var(--line);
+  border-radius:0 0 10px 10px;padding:14px 16px;overflow-x:auto;
+  font-size:13.5px;line-height:1.6;
+}
+figure.code.plain pre{border-radius:10px}
+pre code{font-family:var(--mono)}
+/* syntax colors (applied by the tiny highlighter at the bottom) */
+.tok-kw{color:var(--violet)} .tok-ty{color:var(--blue)} .tok-fn{color:var(--teal)}
+.tok-str{color:var(--green)} .tok-num{color:var(--gold)} .tok-com{color:var(--faint);font-style:italic}
+.tok-attr{color:var(--orange)} .tok-macro{color:var(--orange)}
+/* ---------- deep dives ---------- */
+details.dive{
+  margin:22px 0;border:1px solid var(--line);border-radius:10px;background:var(--bg-soft);
+}
+details.dive>summary{
+  cursor:pointer;list-style:none;padding:13px 18px;font-family:var(--mono);
+  font-size:13.5px;color:var(--gold);user-select:none;
+}
+details.dive>summary::before{content:"▸ ";color:var(--faint)}
+details.dive[open]>summary::before{content:"▾ "}
+details.dive>summary:hover{color:#fff}
+details.dive>.body{padding:2px 22px 20px;border-top:1px solid var(--line)}
+/* ---------- quizzes ---------- */
+.quiz{
+  margin:30px 0 8px;padding:16px 20px 14px;border:1px dashed var(--line);
+  border-radius:10px;background:var(--bg-soft);max-width:78ch;
+}
+.quiz .qtag{font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;color:var(--teal);text-transform:uppercase}
+.quiz details{margin:10px 0;border-left:2px solid var(--line);padding-left:14px}
+.quiz summary{cursor:pointer;color:var(--ink);font-weight:600;list-style:none}
+.quiz summary::before{content:"Q  ";font-family:var(--mono);color:var(--teal)}
+.quiz details[open] summary{color:var(--gold)}
+.quiz details p{color:var(--muted);margin:8px 0 4px}
+/* ---------- tables ---------- */
+.tablewrap{overflow-x:auto;margin:20px 0}
+table{border-collapse:collapse;font-size:14px;min-width:480px}
+th{font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);text-align:left}
+th,td{padding:8px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+td{color:var(--ink)}
+td:first-child{white-space:nowrap}
+tr:hover td{background:var(--panel)}
+/* byte-layout table */
+table.bytes td{font-family:var(--mono);font-size:12.5px;text-align:center;border:1px solid var(--line);padding:6px 4px}
+table.bytes .b-res{background:#7fb4ff22} table.bytes .b-pan{background:#a8d8a022}
+table.bytes .b-zoom{background:#f2c94c22} table.bytes .b-pad{background:#60708022;color:var(--faint)}
+/* ---------- figures / SVG diagrams ---------- */
+figure.diag{margin:26px 0;padding:20px;border:1px solid var(--line);border-radius:10px;background:var(--bg-soft);overflow-x:auto}
+figure.diag svg{max-width:100%;height:auto;display:block;margin:0 auto;color:var(--ink)}
+figure.diag figcaption{font-size:13px;color:var(--muted);margin-top:14px;max-width:76ch}
+/* ---------- glossary ---------- */
+dl.glossary{max-width:78ch}
+dl.glossary dt{
+  font-family:var(--mono);font-weight:600;color:var(--gold);
+  margin-top:18px;scroll-margin-top:90px;
+}
+dl.glossary dt:target{color:#fff;background:var(--gold-soft);border-radius:4px;padding:2px 8px;display:inline-block}
+dl.glossary dd{margin:4px 0 0;color:var(--muted)}
+dl.glossary dd b{color:var(--ink)}
+/* misc */
+.controls{display:flex;gap:10px;margin:18px 0}
+.controls button{
+  font-family:var(--mono);font-size:12px;background:var(--panel);color:var(--muted);
+  border:1px solid var(--line);border-radius:7px;padding:6px 14px;cursor:pointer;
+}
+.controls button:hover{color:var(--gold);border-color:var(--gold)}
+button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.kbd{font-family:var(--mono);font-size:.85em;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:0 .4em;background:var(--panel)}
+sup{color:var(--faint)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- ================= SIDEBAR ================= -->
+<nav class="toc" aria-label="Table of contents">
+  <div class="brand"><b>GRAVITY&nbsp;SIM</b><br><span>EXPLAINED</span></div>
+  <div class="sub">a field guide to every byte of this codebase</div>
+  <ol id="tocList">
+    <li><a href="#ch1"><span class="n">01</span>What you're looking at</a></li>
+    <li><a href="#ch2"><span class="n">02</span>Two computers in your computer</a></li>
+    <li><a href="#ch3"><span class="n">03</span>What a "frame" is</a></li>
+    <li><a href="#ch4"><span class="n">04</span>The map of the code</a></li>
+    <li><a href="#ch5"><span class="n">05</span>The cast of GPU characters</a></li>
+    <li><a href="#ch6"><span class="n">06</span>main.rs — the ignition</a></li>
+    <li><a href="#ch7"><span class="n">07</span>app.rs — the switchboard</a></li>
+    <li><a href="#ch8"><span class="n">08</span>camera.rs — where am I looking</a></li>
+    <li><a href="#ch9"><span class="n">09</span>input.rs — your mouse, translated</a></li>
+    <li><a href="#ch10"><span class="n">10</span>gpu/context.rs — the negotiation</a></li>
+    <li><a href="#ch11"><span class="n">11</span>gpu/renderer.rs — the drawing machine</a></li>
+    <li><a href="#ch12"><span class="n">12</span>shader.wgsl — inside the GPU</a></li>
+    <li><a href="#ch13"><span class="n">13</span>One frame, end to end</a></li>
+    <li><a href="#ch14"><span class="n">14</span>Where the gravity goes</a></li>
+    <li><a href="#gloss"><span class="n">15</span>Glossary</a></li>
+  </ol>
+  <div class="legend">
+    color code, used everywhere:<br>
+    <span class="chip" style="color:var(--gold);background:var(--gold-soft)">CPU / RUST</span>
+    <span class="chip" style="color:var(--blue);background:var(--blue-soft)">GPU / SHADER</span><br>
+    dotted&nbsp;<a class="t" href="#gloss">terms</a>&nbsp;jump to the glossary
+  </div>
+</nav>
+
+<!-- ================= CONTENT ================= -->
+<main>
+
+<header class="hero">
+  <div class="eyebrow">gravity-sim-2d · rust + wgpu</div>
+  <h1>Gravity Sim, Explained</h1>
+  <p class="lede">You asked to be taught like an idiot. Deal. This page walks through
+  <em>every file</em> of the codebase assuming you know <strong>nothing</strong> about GPUs and
+  only a little Rust — and by the end you'll know exactly what happens between
+  "I move my mouse" and "pixels change".</p>
+  <div class="demo" role="img" aria-label="A white square on a black background — the program's entire output">
+    <div class="sq"></div>
+    <div class="cap">fig. 0 — the entire output of this codebase. seriously.</div>
+  </div>
+  <p class="lede" style="font-size:15px">How to read this: the numbered chapters tell one story in order.
+  Inside each chapter, <span style="color:var(--gold);font-family:var(--mono);font-size:13px">▸ deep dive</span> panels
+  unfold the actual code line by line — open them when you want the gory details, skip them when you don't.
+  Gold boxes teach you Rust. Blue boxes teach you GPU. Teal boxes answer "ok but <em>why</em>".</p>
+  <div class="controls">
+    <button id="openAll" type="button">expand all deep dives</button>
+    <button id="closeAll" type="button">collapse all</button>
+  </div>
+</header>
+
+<!-- ============================================================ CH 1 -->
+<section class="ch" id="ch1">
+  <div class="chhead"><span class="n">01</span><h2>What you're looking at</h2></div>
+
+  <p>When you run <code>cargo run</code>, this program does exactly four things:</p>
+  <ol>
+    <li><strong>Opens a window</strong> — a normal, resizable OS window titled "Gravity Sim 2D".</li>
+    <li><strong>Finds your graphics card</strong> — it prints <code>Using GPU: NVIDIA GeForce RTX 4080 SUPER (Vulkan)</code> because it genuinely goes and gets your RTX 4080.</li>
+    <li><strong>Draws, forever</strong> — it repaints the window from scratch, in lockstep with your monitor's refresh rate. Every repaint is: fill everything with black, draw one white square.</li>
+    <li><strong>Listens to you</strong> — scroll wheel zooms, left-drag pans, <span class="kbd">Esc</span> quits. Resizing the window does <em>not</em> scale the scene — it just shows you more or less of the world.</li>
+  </ol>
+  <p>That's it. It's deliberately tiny — it's the <em>chassis</em> for a gravity simulation
+  that doesn't exist yet. But this chassis already contains every fundamental concept of
+  GPU programming, which is why it's worth understanding completely.</p>
+
+  <h3>The parts we didn't write</h3>
+  <p>Rust programs pull in libraries ("crates") declared in <span class="file">Cargo.toml</span>.
+  Ours uses five, and it's worth knowing what job each one has, because the whole codebase
+  is basically us gluing two big ones together:</p>
+
+  <div class="tablewrap"><table>
+    <tr><th>crate</th><th>version</th><th>what it actually does for us</th></tr>
+    <tr><td><code>winit</code> <span class="side cpu">CPU</span></td><td>0.30</td>
+      <td><strong>Windowing.</strong> Talks to the operating system: "make me a window", "tell me when the mouse moves", "tell me when the user resizes". It knows nothing about drawing.</td></tr>
+    <tr><td><code>wgpu</code> <span class="side gpu">GPU</span></td><td>30.0</td>
+      <td><strong>Graphics.</strong> Talks to the graphics card. On your machine it speaks <a class="t" href="#g-vulkan">Vulkan</a> to the NVIDIA driver; on a Mac it would speak Metal, on the web WebGPU. Same Rust code either way.</td></tr>
+    <tr><td><code>pollster</code></td><td>1.0</td>
+      <td>A 50-line utility: lets us call wgpu's <code>async</code> functions and just <em>wait</em> for the answer (chapter 10 explains why that's needed).</td></tr>
+    <tr><td><code>bytemuck</code></td><td>1.25</td>
+      <td>Safely converts a Rust struct into raw bytes. The GPU doesn't take structs, it takes bytes (chapter 11).</td></tr>
+    <tr><td><code>env_logger</code></td><td>0.11</td>
+      <td>Prints wgpu's warnings/errors to the terminal. Without it, problems are <em>silent</em>. Run with <code>RUST_LOG=warn cargo run</code> to see more.</td></tr>
+  </table></div>
+
+  <div class="aside why"><span class="tag">why though?</span>
+    <p>Why two separate big libraries? Because the OS and the GPU are genuinely separate
+    machines with separate rules. winit's job ends where the inside of the window begins;
+    wgpu's job is only the inside. The single point where they meet is called a
+    <a class="t" href="#g-surface">surface</a> — wgpu's name for "the drawable part of a window".</p>
+  </div>
+</section>
+
+<!-- ============================================================ CH 2 -->
+<section class="ch" id="ch2">
+  <div class="chhead"><span class="n">02</span><h2>Two computers in your computer</h2></div>
+
+  <p>Everything in this codebase makes sense once you accept one fact:
+  <strong>your PC contains two very different computers</strong>, and this program runs on both at once.</p>
+
+  <figure class="diag">
+    <svg viewBox="0 0 760 300" role="img" aria-label="CPU and GPU side by side: CPU runs one smart core with your Rust code; GPU runs thousands of simple cores all running the same shader; they communicate over a relatively slow bus by sending buffers and commands">
+      <!-- CPU box -->
+      <rect x="20" y="30" width="300" height="210" rx="10" fill="none" stroke="#f2c94c" stroke-width="1.5"/>
+      <text x="40" y="60" fill="#f2c94c" font-family="monospace" font-size="14" font-weight="bold">CPU</text>
+      <text x="40" y="80" fill="#9aa3b8" font-size="12">a few very smart cores</text>
+      <rect x="40" y="98" width="260" height="30" rx="5" fill="#f2c94c22" stroke="#f2c94c" stroke-width="1"/>
+      <text x="52" y="118" fill="#e7eaf2" font-family="monospace" font-size="12">your Rust code (all of src/)</text>
+      <text x="40" y="152" fill="#9aa3b8" font-size="12">runs ONCE per frame:</text>
+      <text x="52" y="172" fill="#9aa3b8" font-size="12">· reads mouse events</text>
+      <text x="52" y="190" fill="#9aa3b8" font-size="12">· updates camera numbers</text>
+      <text x="52" y="208" fill="#9aa3b8" font-size="12">· writes a command list</text>
+      <!-- GPU box -->
+      <rect x="440" y="30" width="300" height="210" rx="10" fill="none" stroke="#7fb4ff" stroke-width="1.5"/>
+      <text x="460" y="60" fill="#7fb4ff" font-family="monospace" font-size="14" font-weight="bold">GPU</text>
+      <text x="460" y="80" fill="#9aa3b8" font-size="12">thousands of simple cores</text>
+      <rect x="460" y="98" width="260" height="30" rx="5" fill="#7fb4ff22" stroke="#7fb4ff" stroke-width="1"/>
+      <text x="472" y="118" fill="#e7eaf2" font-family="monospace" font-size="12">the shader (src/gpu/shader.wgsl)</text>
+      <text x="460" y="152" fill="#9aa3b8" font-size="12">runs THOUSANDS of times per frame:</text>
+      <text x="472" y="172" fill="#9aa3b8" font-size="12">· once per corner of the square</text>
+      <text x="472" y="190" fill="#9aa3b8" font-size="12">· once per pixel it covers</text>
+      <text x="472" y="208" fill="#9aa3b8" font-size="12">· all in parallel</text>
+      <!-- bus -->
+      <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9aa3b8"/></marker></defs>
+      <line x1="322" y1="110" x2="438" y2="110" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr)"/>
+      <text x="380" y="100" fill="#9aa3b8" font-size="11.5" text-anchor="middle">bytes + commands</text>
+      <line x1="438" y1="170" x2="322" y2="170" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr)"/>
+      <text x="380" y="192" fill="#9aa3b8" font-size="11.5" text-anchor="middle">finished image</text>
+      <text x="380" y="266" fill="#606a80" font-size="11.5" text-anchor="middle">the two only talk by sending data across — they share no variables</text>
+    </svg>
+    <figcaption><strong>fig. 1 — the fundamental split.</strong> The gold side is every
+    <code>.rs</code> file in this project. The blue side is the one <code>.wgsl</code> file.
+    They are different programs, in different languages, running on different processors.</figcaption>
+  </figure>
+
+  <p>The <strong>CPU</strong> is a few extremely clever cores. It runs your operating system,
+  your Rust code, everything. It's great at complicated, branching, one-thing-after-another logic.</p>
+  <p>The <strong>GPU</strong> is <em>thousands</em> of dumb cores. Each one is slow and simple,
+  but they all run <strong>the same tiny program at the same time on different data</strong>.
+  Drawing graphics is exactly that shape of problem: "for each of these 160,000 pixels, decide a color"
+  — so give each core a pixel and let them all go at once.</p>
+  <p>That tiny program the GPU cores run is called a <a class="t" href="#g-shader">shader</a>.
+  Ours lives in <span class="file">src/gpu/shader.wgsl</span>, written in a language called
+  <a class="t" href="#g-wgsl">WGSL</a>. Chapter 12 dissects it character by character.</p>
+
+  <div class="aside gpu"><span class="tag">GPU concept</span>
+    <p><strong>Why can't the CPU just draw?</strong> It can! Old software did. But "set 160,000
+    pixels, 165 times a second, while also running physics" is a lot of repetitive work, and the CPU
+    does it one pixel at a time. The GPU does thousands at a time. For the future gravity sim —
+    "compute forces for 100,000 particles" — the same parallelism applies, which is why this
+    project is GPU-first from day one.</p>
+  </div>
+
+  <div class="quiz"><span class="qtag">check yourself</span>
+    <details><summary>The white square shows up at 400×400 pixels. Roughly how many times does the <em>fragment</em> part of our shader run per frame?</summary>
+      <p>About 160,000 times — once per covered pixel (400 × 400 = 160,000). And the GPU shrugs; that's a rounding error for it. Chapter 12 explains fragments properly.</p></details>
+    <details><summary>Can the Rust code read a variable that lives in the shader, like <code>pixels</code>?</summary>
+      <p>No. They're separate programs on separate processors with separate memory. The only communication is explicit: the CPU <em>sends</em> bytes (buffers, commands), the GPU <em>produces</em> an image. That's why chapter 11 makes such a fuss about copying a struct into a buffer.</p></details>
+  </div>
+</section>
+
+<!-- ============================================================ CH 3 -->
+<section class="ch" id="ch3">
+  <div class="chhead"><span class="n">03</span><h2>What a "frame" is</h2></div>
+
+  <p>The window is not a painting; it's a flipbook. The program produces a complete
+  new image — a <a class="t" href="#g-frame">frame</a> — over and over, and your monitor
+  shows each one for ~6 milliseconds (at 165&nbsp;Hz). Nothing on screen "stays"; if it's
+  visible, it's because we redrew it this frame, from scratch, again.</p>
+
+  <figure class="diag">
+    <svg viewBox="0 0 780 170" role="img" aria-label="The frame cycle: wait for events, update camera, record commands, GPU draws, present to screen, monitor shows it, repeat">
+      <defs><marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9aa3b8"/></marker></defs>
+      <rect x="15"  y="40" width="130" height="52" rx="8" fill="#f2c94c22" stroke="#f2c94c"/>
+      <text x="80"  y="62" fill="#e7eaf2" font-size="12" text-anchor="middle">handle events</text>
+      <text x="80"  y="79" fill="#9aa3b8" font-size="10.5" text-anchor="middle">mouse, resize…</text>
+      <rect x="175" y="40" width="130" height="52" rx="8" fill="#f2c94c22" stroke="#f2c94c"/>
+      <text x="240" y="62" fill="#e7eaf2" font-size="12" text-anchor="middle">update camera</text>
+      <text x="240" y="79" fill="#9aa3b8" font-size="10.5" text-anchor="middle">pan / zoom numbers</text>
+      <rect x="335" y="40" width="130" height="52" rx="8" fill="#f2c94c22" stroke="#f2c94c"/>
+      <text x="400" y="62" fill="#e7eaf2" font-size="12" text-anchor="middle">record commands</text>
+      <text x="400" y="79" fill="#9aa3b8" font-size="10.5" text-anchor="middle">"clear black, draw 6"</text>
+      <rect x="495" y="40" width="130" height="52" rx="8" fill="#7fb4ff22" stroke="#7fb4ff"/>
+      <text x="560" y="62" fill="#e7eaf2" font-size="12" text-anchor="middle">GPU executes</text>
+      <text x="560" y="79" fill="#9aa3b8" font-size="10.5" text-anchor="middle">shader runs</text>
+      <rect x="655" y="40" width="110" height="52" rx="8" fill="#7fb4ff22" stroke="#7fb4ff"/>
+      <text x="710" y="62" fill="#e7eaf2" font-size="12" text-anchor="middle">present</text>
+      <text x="710" y="79" fill="#9aa3b8" font-size="10.5" text-anchor="middle">image → screen</text>
+      <line x1="147" y1="66" x2="173" y2="66" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr2)"/>
+      <line x1="307" y1="66" x2="333" y2="66" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr2)"/>
+      <line x1="467" y1="66" x2="493" y2="66" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr2)"/>
+      <line x1="627" y1="66" x2="653" y2="66" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr2)"/>
+      <path d="M 710 94 L 710 130 L 80 130 L 80 96" fill="none" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr2)"/>
+      <text x="395" y="147" fill="#9aa3b8" font-size="11.5" text-anchor="middle">repeat, throttled to the monitor's refresh rate by vsync ("Fifo")</text>
+    </svg>
+    <figcaption><strong>fig. 2 — the life of one frame.</strong> Gold stages are Rust on the CPU;
+    blue stages are the GPU. The whole loop runs once per screen refresh.</figcaption>
+  </figure>
+
+  <h3>Who keeps the loop spinning?</h3>
+  <p>winit is event-driven: it <em>sleeps</em> until something happens. So how do we redraw
+  continuously? At the end of every draw, <span class="file">src/app.rs</span> calls
+  <code>request_redraw()</code> — "wake me up to draw again". That would spin at 100% CPU,
+  except for one elegant brake: the surface is configured in <strong>Fifo</strong> mode
+  (chapter 10), which means "presenting a finished image <em>waits</em> for the monitor's next
+  refresh". That wait is <a class="t" href="#g-vsync">vsync</a>. Free, perfectly-paced throttling
+  — and later it's the natural heartbeat for simulation ticks.</p>
+
+  <div class="aside why"><span class="tag">why though?</span>
+    <p><strong>Why redraw at all when nothing changed?</strong> Right now we technically could
+    redraw only on input. But a gravity simulation changes <em>every</em> frame by itself, so the
+    architecture assumes continuous motion from day one. It also makes resize/zoom/pan feel
+    instant — there's always a fresh frame at most ~6ms away.</p>
+  </div>
+
+  <div class="quiz"><span class="qtag">check yourself</span>
+    <details><summary>You drag the square to the right, then let go and don't touch anything. Is the program still drawing?</summary>
+      <p>Yes — same loop, same rate, drawing the same image over and over. The square stays put because the camera numbers stopped changing, not because drawing stopped.</p></details>
+    <details><summary>What stops the redraw loop from using 100% of a CPU core?</summary>
+      <p>Vsync. Presenting in Fifo mode blocks until the monitor is ready for a new image, so the loop naturally runs at the refresh rate and sleeps the rest of the time.</p></details>
+  </div>
+</section>
+
+<!-- ============================================================ CH 4 -->
+<section class="ch" id="ch4">
+  <div class="chhead"><span class="n">04</span><h2>The map of the code</h2></div>
+
+  <p>Seven files, each with exactly one job. The dependency arrows only point one way —
+  down — which is what makes the codebase easy to grow:</p>
+
+  <figure class="diag">
+    <svg viewBox="0 0 760 400" role="img" aria-label="Module map: main.rs starts app.rs; app.rs routes events to input.rs, camera.rs and the gpu modules; input.rs writes to camera.rs; renderer.rs reads camera.rs and uses context.rs; shader.wgsl is embedded by renderer.rs">
+      <defs><marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9aa3b8"/></marker></defs>
+      <rect x="300" y="16" width="160" height="44" rx="8" fill="#f2c94c22" stroke="#f2c94c"/>
+      <text x="380" y="35" fill="#e7eaf2" font-family="monospace" font-size="12.5" text-anchor="middle">main.rs</text>
+      <text x="380" y="51" fill="#9aa3b8" font-size="10.5" text-anchor="middle">start everything</text>
+      <rect x="300" y="100" width="160" height="44" rx="8" fill="#f2c94c22" stroke="#f2c94c"/>
+      <text x="380" y="119" fill="#e7eaf2" font-family="monospace" font-size="12.5" text-anchor="middle">app.rs</text>
+      <text x="380" y="135" fill="#9aa3b8" font-size="10.5" text-anchor="middle">route OS events</text>
+      <rect x="60" y="200" width="160" height="44" rx="8" fill="#f2c94c22" stroke="#f2c94c"/>
+      <text x="140" y="219" fill="#e7eaf2" font-family="monospace" font-size="12.5" text-anchor="middle">input.rs</text>
+      <text x="140" y="235" fill="#9aa3b8" font-size="10.5" text-anchor="middle">mouse → intent</text>
+      <rect x="60" y="300" width="160" height="44" rx="8" fill="#f2c94c22" stroke="#f2c94c"/>
+      <text x="140" y="319" fill="#e7eaf2" font-family="monospace" font-size="12.5" text-anchor="middle">camera.rs</text>
+      <text x="140" y="335" fill="#9aa3b8" font-size="10.5" text-anchor="middle">pan + zoom state</text>
+      <rect x="300" y="200" width="160" height="44" rx="8" fill="#7fb4ff22" stroke="#7fb4ff"/>
+      <text x="380" y="219" fill="#e7eaf2" font-family="monospace" font-size="12.5" text-anchor="middle">gpu/context.rs</text>
+      <text x="380" y="235" fill="#9aa3b8" font-size="10.5" text-anchor="middle">own the GPU handles</text>
+      <rect x="540" y="200" width="160" height="44" rx="8" fill="#7fb4ff22" stroke="#7fb4ff"/>
+      <text x="620" y="219" fill="#e7eaf2" font-family="monospace" font-size="12.5" text-anchor="middle">gpu/renderer.rs</text>
+      <text x="620" y="235" fill="#9aa3b8" font-size="10.5" text-anchor="middle">draw one frame</text>
+      <rect x="540" y="300" width="160" height="44" rx="8" fill="#7fb4ff22" stroke="#7fb4ff"/>
+      <text x="620" y="319" fill="#e7eaf2" font-family="monospace" font-size="12.5" text-anchor="middle">gpu/shader.wgsl</text>
+      <text x="620" y="335" fill="#9aa3b8" font-size="10.5" text-anchor="middle">runs ON the GPU</text>
+      <line x1="380" y1="62" x2="380" y2="98" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr3)"/>
+      <text x="392" y="85" fill="#9aa3b8" font-size="10.5">starts</text>
+      <line x1="320" y1="146" x2="170" y2="198" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr3)"/>
+      <text x="215" y="163" fill="#9aa3b8" font-size="10.5">mouse events</text>
+      <line x1="380" y1="146" x2="380" y2="198" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr3)"/>
+      <text x="392" y="177" fill="#9aa3b8" font-size="10.5">resize, redraw</text>
+      <line x1="440" y1="146" x2="590" y2="198" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr3)"/>
+      <text x="540" y="163" fill="#9aa3b8" font-size="10.5">"draw now"</text>
+      <line x1="140" y1="246" x2="140" y2="298" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr3)"/>
+      <text x="152" y="277" fill="#9aa3b8" font-size="10.5">updates pan/zoom</text>
+      <line x1="538" y1="238" x2="462" y2="230" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr3)"/>
+      <text x="500" y="260" fill="#9aa3b8" font-size="10.5" text-anchor="middle">uses device/queue</text>
+      <line x1="620" y1="246" x2="620" y2="298" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr3)"/>
+      <text x="632" y="277" fill="#9aa3b8" font-size="10.5">embeds + runs</text>
+      <path d="M 222 322 C 340 322 480 260 538 246" fill="none" stroke="#9aa3b8" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#arr3)"/>
+      <text x="360" y="352" fill="#9aa3b8" font-size="10.5">renderer reads camera numbers each frame</text>
+    </svg>
+    <figcaption><strong>fig. 3 — who talks to whom.</strong> Notice <span class="file">camera.rs</span>
+    knows nothing about windows or GPUs — it's pure math. And the GPU side never touches winit.
+    <span class="file">app.rs</span> is the only file that knows everyone.</figcaption>
+  </figure>
+
+  <h3>Project plumbing (the non-code files)</h3>
+  <div class="tablewrap"><table>
+    <tr><th>file</th><th>what it is</th></tr>
+    <tr><td><span class="file">Cargo.toml</span></td><td>The project manifest: name, Rust edition, and the five dependencies from chapter 1. Rust's equivalent of <code>package.json</code>.</td></tr>
+    <tr><td><span class="file">Cargo.lock</span></td><td>Auto-generated: the <em>exact</em> version of every crate (including dependencies-of-dependencies) so builds are reproducible. Never edited by hand.</td></tr>
+    <tr><td><span class="file">target/</span></td><td>Build output. Machine-generated, gigabytes over time, safely deletable, git-ignored.</td></tr>
+    <tr><td><span class="file">../shell.nix</span></td><td>For your NixOS machine: a dev-shell recipe providing the Rust toolchain <em>plus</em> the runtime libraries (Vulkan loader, Wayland/X11 libs) that winit/wgpu load at startup — NixOS has no <code>/usr/lib</code> for them to find otherwise.</td></tr>
+    <tr><td><span class="file">GUIDE.html</span></td><td>You are here.</td></tr>
+  </table></div>
+
+  <div class="aside rust"><span class="tag">Rust — modules</span>
+    <p>In Rust, every file is a <strong>module</strong>. Writing <code>mod camera;</code> in
+    <span class="file">main.rs</span> means "the file <code>camera.rs</code> is part of this
+    program, call its stuff <code>camera::…</code>". A folder with a <code>mod.rs</code> inside
+    (like <span class="file">gpu/</span>) is a module containing sub-modules. Nothing is included
+    by magic — if it's not declared with <code>mod</code>, it's not compiled.</p>
+  </div>
+</section>
+
+<!-- ============================================================ CH 5 -->
+<section class="ch" id="ch5">
+  <div class="chhead"><span class="n">05</span><h2>The cast of GPU characters</h2></div>
+
+  <p>wgpu makes you meet about eight objects before anything appears on screen. This chapter
+  is your character sheet — later chapters assume you can tell them apart. They're created
+  in a strict order, each from the previous:</p>
+
+  <figure class="diag">
+    <svg viewBox="0 0 780 330" role="img" aria-label="Creation hierarchy: Instance creates Surface and Adapter; Adapter creates Device and Queue; Device creates buffers, pipelines and bind groups">
+      <defs><marker id="arr4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9aa3b8"/></marker></defs>
+      <rect x="290" y="14" width="200" height="46" rx="8" fill="#7fb4ff22" stroke="#7fb4ff"/>
+      <text x="390" y="34" fill="#e7eaf2" font-family="monospace" font-size="13" text-anchor="middle">Instance</text>
+      <text x="390" y="50" fill="#9aa3b8" font-size="10.5" text-anchor="middle">wgpu's front door</text>
+      <rect x="80" y="110" width="200" height="46" rx="8" fill="#7fb4ff22" stroke="#7fb4ff"/>
+      <text x="180" y="130" fill="#e7eaf2" font-family="monospace" font-size="13" text-anchor="middle">Surface</text>
+      <text x="180" y="146" fill="#9aa3b8" font-size="10.5" text-anchor="middle">the window's canvas</text>
+      <rect x="500" y="110" width="200" height="46" rx="8" fill="#7fb4ff22" stroke="#7fb4ff"/>
+      <text x="600" y="130" fill="#e7eaf2" font-family="monospace" font-size="13" text-anchor="middle">Adapter</text>
+      <text x="600" y="146" fill="#9aa3b8" font-size="10.5" text-anchor="middle">your RTX 4080 SUPER</text>
+      <rect x="390" y="210" width="150" height="46" rx="8" fill="#7fb4ff22" stroke="#7fb4ff"/>
+      <text x="465" y="230" fill="#e7eaf2" font-family="monospace" font-size="13" text-anchor="middle">Device</text>
+      <text x="465" y="246" fill="#9aa3b8" font-size="10.5" text-anchor="middle">creates things</text>
+      <rect x="570" y="210" width="150" height="46" rx="8" fill="#7fb4ff22" stroke="#7fb4ff"/>
+      <text x="645" y="230" fill="#e7eaf2" font-family="monospace" font-size="13" text-anchor="middle">Queue</text>
+      <text x="645" y="246" fill="#9aa3b8" font-size="10.5" text-anchor="middle">executes things</text>
+      <rect x="150" y="286" width="560" height="36" rx="8" fill="none" stroke="#7fb4ff" stroke-dasharray="4 4"/>
+      <text x="430" y="309" fill="#9aa3b8" font-size="11.5" text-anchor="middle">buffers · shader modules · pipelines · bind groups   (all made by the Device)</text>
+      <line x1="330" y1="62" x2="220" y2="108" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr4)"/>
+      <text x="240" y="82" fill="#9aa3b8" font-size="10.5">create_surface(window)</text>
+      <line x1="450" y1="62" x2="560" y2="108" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr4)"/>
+      <text x="530" y="82" fill="#9aa3b8" font-size="10.5">request_adapter(…)</text>
+      <line x1="560" y1="158" x2="490" y2="208" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr4)"/>
+      <line x1="620" y1="158" x2="640" y2="208" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr4)"/>
+      <text x="585" y="186" fill="#9aa3b8" font-size="10.5">request_device(…)</text>
+      <line x1="440" y1="258" x2="410" y2="284" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr4)"/>
+    </svg>
+    <figcaption><strong>fig. 4 — the creation chain</strong>, exactly as it happens in
+    <span class="file">src/gpu/context.rs</span>. Each arrow is one function call in that file.</figcaption>
+  </figure>
+
+  <div class="tablewrap"><table>
+    <tr><th>object</th><th>plain-language job</th><th>analogy</th></tr>
+    <tr><td><a class="t" href="#g-instance">Instance</a></td><td>The wgpu library itself, initialized. Entry point for everything.</td><td>the phone company</td></tr>
+    <tr><td><a class="t" href="#g-surface">Surface</a></td><td>The drawable inside of our window, from the GPU's point of view.</td><td>the canvas nailed to the window frame</td></tr>
+    <tr><td><a class="t" href="#g-adapter">Adapter</a></td><td>One physical GPU. We ask for the "high performance" one, which is how the RTX 4080 gets picked over anything integrated.</td><td>a card in a shop window — look, don't touch</td></tr>
+    <tr><td><a class="t" href="#g-device">Device</a></td><td>An open connection to that GPU. Every resource (buffer, pipeline…) is created through it. Also validates everything we do and yells (via the logger) when we mess up.</td><td>a signed contract with the card</td></tr>
+    <tr><td><a class="t" href="#g-queue">Queue</a></td><td>Where finished command lists get submitted for the GPU to actually execute. Also does small data uploads (<code>write_buffer</code>).</td><td>the card's inbox</td></tr>
+    <tr><td><a class="t" href="#g-buffer">Buffer</a></td><td>A dumb block of GPU memory, n bytes long. Ours is 24 bytes and holds the camera.</td><td>a parcel locker</td></tr>
+    <tr><td><a class="t" href="#g-pipeline">Render pipeline</a></td><td>The full recipe for one way of drawing: which shader, what output format, triangles-vs-lines, etc. Baked once, reused every frame.</td><td>a laminated recipe card</td></tr>
+    <tr><td><a class="t" href="#g-bindgroup">Bind group</a></td><td>Connects actual buffers to the numbered sockets the shader declares (<code>@group(0) @binding(0)</code>).</td><td>plugging cables into a numbered patch panel</td></tr>
+  </table></div>
+
+  <div class="quiz"><span class="qtag">check yourself</span>
+    <details><summary>Which object would you ask: "make me a new 4MB buffer for particles"?</summary>
+      <p>The <b>Device</b> — it creates all resources. (The Queue would then be used to copy particle data into it.)</p></details>
+    <details><summary>Why do Surface and Adapter both come straight from the Instance, rather than one from the other?</summary>
+      <p>They're independent facts about your machine: the Surface is about the <em>window</em>, the Adapter is about the <em>GPU</em>. They only meet later, when we ask "which adapters can draw to this surface" and then configure the surface using the chosen device.</p></details>
+  </div>
+</section>
+
+<!-- ============================================================ CH 6 -->
+<section class="ch" id="ch6">
+  <div class="chhead"><span class="n">06</span><h2>main.rs — the ignition</h2></div>
+
+  <p>The shortest file, and the only one the program starts in. Its whole job:
+  turn on logging, build the event loop, hand control to <code>App</code> — then it
+  never returns until you quit.</p>
+
+  <figure class="code"><figcaption>src/main.rs — the entire file (doc comments trimmed)<span class="lang">rust</span></figcaption>
+<pre><code class="lang-rust">mod app;
+mod camera;
+mod gpu;
+mod input;
+
+use winit::event_loop::EventLoop;
+
+use crate::app::App;
+
+fn main() {
+    // Without a logger, wgpu's error messages vanish silently.
+    env_logger::init();
+
+    // The OS-facing heart: blocks waiting for events, dispatches them to App.
+    let event_loop = EventLoop::new().unwrap();
+    let mut app = App::default();
+    event_loop.run_app(&amp;mut app).unwrap();
+}</code></pre></figure>
+
+  <details class="dive"><summary>deep dive: every line</summary><div class="body">
+    <p><code>mod app;</code> and friends — these four lines <em>are</em> the project structure.
+    Each one tells the compiler "compile that file too, as a module of this program"
+    (see the Rust box in chapter 4). Order doesn't matter.</p>
+    <p><code>use winit::event_loop::EventLoop;</code> — a <code>use</code> is just an
+    abbreviation. Without it you'd write the full path
+    <code>winit::event_loop::EventLoop::new()</code> every time. Nothing is "imported"
+    in a runtime sense; it's naming convenience only.</p>
+    <p><code>env_logger::init();</code> — installs the logger. wgpu almost never panics on
+    mistakes; it reports them through Rust's standard <code>log</code> system. No logger
+    installed = errors go nowhere. This line is one of those things you set up once and it
+    saves you a day of confusion six months later. You control it with an environment
+    variable: <code>RUST_LOG=warn cargo run</code>.</p>
+    <p><code>EventLoop::new().unwrap()</code> — asks the OS for an event loop.</p>
+    <div class="aside rust"><span class="tag">Rust — unwrap and Result</span>
+      <p>Rust functions that can fail return a <code>Result</code> — a value that is either
+      <code>Ok(the thing)</code> or <code>Err(what went wrong)</code>. The compiler forces you
+      to decide what to do about the <code>Err</code> case. <code>.unwrap()</code> is the
+      bluntest decision: "give me the thing; if it failed, crash the program right here."
+      Perfectly reasonable at startup — if you can't even get an event loop, there's nothing
+      sensible to do but die loudly.</p>
+    </div>
+    <p><code>let mut app = App::default();</code> — builds our application object with
+    every field at its default (no GPU yet, camera at start position).</p>
+    <div class="aside rust"><span class="tag">Rust — mut</span>
+      <p>Variables are immutable unless you say <code>mut</code>. The event loop will be
+      changing <code>app</code>'s insides constantly (camera moves, GPU state appears), so it
+      must be declared mutable — and <code>&amp;mut app</code> on the next line lends the loop
+      <em>mutable access</em> to it.</p>
+    </div>
+    <p><code>event_loop.run_app(&amp;mut app)</code> — the point of no return. From here on,
+    winit owns the thread: it sleeps until the OS reports something (mouse moved, redraw
+    needed), calls the matching method on <code>app</code>, and sleeps again. Forever, until
+    something calls <code>event_loop.exit()</code> — which <span class="file">app.rs</span>
+    does on <span class="kbd">Esc</span> or the window's ✕.</p>
+  </div></details>
+</section>
+
+<!-- ============================================================ CH 7 -->
+<section class="ch" id="ch7">
+  <div class="chhead"><span class="n">07</span><h2>app.rs — the switchboard</h2></div>
+
+  <p><span class="file">src/app.rs</span> is the operator at the old telephone exchange:
+  every event the OS sends arrives here, gets identified, and gets plugged through to the
+  one module that handles it. It contains almost no logic of its own — deliberately.</p>
+
+  <h3>The deal winit offers</h3>
+  <p>winit says: <em>"implement my <code>ApplicationHandler</code> interface — a
+  <code>resumed</code> method and a <code>window_event</code> method — and I'll call them at
+  the right times."</em> Our whole file is filling in that form.</p>
+
+  <div class="aside rust"><span class="tag">Rust — traits</span>
+    <p>A <strong>trait</strong> is a named list of methods — a contract. <code>impl
+    ApplicationHandler for App { … }</code> means "my <code>App</code> type fulfills that
+    contract; here are the method bodies." It's how one library (winit) can call into code
+    it has never seen (ours). If you know interfaces from other languages: same idea.</p>
+  </div>
+
+  <div class="tablewrap"><table>
+    <tr><th>event from the OS</th><th>what app.rs does with it</th></tr>
+    <tr><td><code>resumed</code></td><td>First call after startup → create the window, boot the GPU (once).</td></tr>
+    <tr><td><code>CloseRequested</code> / <span class="kbd">Esc</span></td><td><code>event_loop.exit()</code> — end of program.</td></tr>
+    <tr><td><code>Resized</code></td><td>→ <code>ctx.resize()</code> (chapter 10). Camera untouched — that's the no-scaling rule.</td></tr>
+    <tr><td><code>RedrawRequested</code></td><td>→ acquire a frame, → <code>renderer.render()</code>, then immediately request the next redraw.</td></tr>
+    <tr><td><code>CursorMoved</code> / <code>MouseInput</code> / <code>MouseWheel</code></td><td>→ the <code>CameraController</code> (chapter 9).</td></tr>
+    <tr><td><code>Occluded(false)</code></td><td>Window just became visible again → kick the redraw loop awake.</td></tr>
+    <tr><td>everything else</td><td>Ignored (<code>_ =&gt; {}</code>). The OS sends dozens of event kinds we don't care about.</td></tr>
+  </table></div>
+
+  <details class="dive"><summary>deep dive: the state, and why it's an Option</summary><div class="body">
+<figure class="code"><figcaption>src/app.rs — the data<span class="lang">rust</span></figcaption>
+<pre><code class="lang-rust">struct Gpu {
+    ctx: GpuContext,
+    renderer: Renderer,
+}
+
+#[derive(Default)]
+pub struct App {
+    /// `None` until the first `resumed` call — winit only allows window
+    /// creation from inside the event loop, not before it starts.
+    gpu: Option&lt;Gpu&gt;,
+    camera: Camera,
+    controller: CameraController,
+}</code></pre></figure>
+    <div class="aside rust"><span class="tag">Rust — Option</span>
+      <p>Rust has no <code>null</code>. When a value can legitimately not-exist-yet, you say so
+      in the type: <code>Option&lt;Gpu&gt;</code> is either <code>Some(gpu)</code> or
+      <code>None</code>, and the compiler refuses to let you use it without checking which.
+      Here it encodes a real-world awkwardness: <code>App</code> is created in
+      <code>main()</code>, but winit forbids creating windows before the event loop runs — so
+      for a brief moment the app exists without its window/GPU half. The <code>Option</code>
+      makes that moment impossible to mishandle.</p>
+    </div>
+    <div class="aside rust"><span class="tag">Rust — derive</span>
+      <p><code>#[derive(Default)]</code> is a <strong>derive macro</strong>: the compiler
+      writes the boring <code>Default</code> implementation for you (each field gets its own
+      default: <code>None</code>, default camera, default controller). Anything in
+      <code>#[…]</code> is an <em>attribute</em> — metadata attached to the next item.
+      You'll meet more powerful ones in chapter 11.</p>
+    </div>
+  </div></details>
+
+  <details class="dive"><summary>deep dive: resumed — booting the world</summary><div class="body">
+<figure class="code"><figcaption>src/app.rs — resumed() (comments trimmed)<span class="lang">rust</span></figcaption>
+<pre><code class="lang-rust">fn resumed(&amp;mut self, event_loop: &amp;ActiveEventLoop) {
+    if self.gpu.is_some() {
+        return; // already initialized
+    }
+
+    let attributes = Window::default_attributes()
+        .with_title("Gravity Sim 2D")
+        .with_inner_size(INITIAL_WINDOW_SIZE);   // 1280×720 logical px
+    let window = Arc::new(
+        event_loop
+            .create_window(attributes)
+            .expect("Failed to create window"),
+    );
+
+    let ctx = pollster::block_on(GpuContext::new(
+        window,
+        event_loop.owned_display_handle(),
+    ));
+    let renderer = Renderer::new(&amp;ctx);
+
+    ctx.window.request_redraw();     // kick off the endless redraw loop
+    self.gpu = Some(Gpu { ctx, renderer });
+}</code></pre></figure>
+    <p>Three things worth pausing on:</p>
+    <p><strong>1. The 1280×720 is <em>logical</em> pixels.</strong> On a monitor with 125%
+    scaling, winit multiplies by 1.25 and makes a 1600×900 physical window. Everything after
+    this line works in <a class="t" href="#g-physpix">physical pixels</a>.</p>
+    <p><strong>2. <code>Arc::new(…)</code>.</strong></p>
+    <div class="aside rust"><span class="tag">Rust — Arc, or shared ownership</span>
+      <p>Rust's core rule: every value has exactly <em>one</em> owner, so the compiler always
+      knows when to free it. But the window genuinely needs two owners: our <code>App</code>
+      (to ask for redraws) and the GPU <a class="t" href="#g-surface">surface</a> (which draws
+      into it and must never outlive it). <code>Arc</code> — Atomically Reference Counted —
+      is the escape hatch: a counter travels with the value; <code>.clone()</code> makes a new
+      handle and bumps the counter; the value is freed when the counter hits zero. Cheap,
+      safe, everywhere in Rust code that shares things.</p>
+    </div>
+    <p><strong>3. <code>pollster::block_on(…)</code>.</strong></p>
+    <div class="aside rust"><span class="tag">Rust — async, in one paragraph</span>
+      <p>An <code>async fn</code> doesn't run when called — it returns a <em>plan</em> (a
+      "future") that must be driven to completion by an executor. wgpu makes GPU setup
+      <code>async</code> because on some platforms (the web) you're not allowed to wait
+      blocking-style. On desktop, we're happy to just wait — and that's the entire job of
+      <code>pollster::block_on</code>: "run this future right here, right now, and give me the
+      result." One line of ceremony, then async never bothers us again.</p>
+    </div>
+  </div></details>
+
+  <details class="dive"><summary>deep dive: window_event — the actual switchboard</summary><div class="body">
+<figure class="code"><figcaption>src/app.rs — window_event() (comments trimmed)<span class="lang">rust</span></figcaption>
+<pre><code class="lang-rust">fn window_event(&amp;mut self, event_loop: &amp;ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+    let Some(gpu) = &amp;mut self.gpu else {
+        return; // events can arrive before initialization; ignore them
+    };
+
+    match event {
+        WindowEvent::CloseRequested
+        | WindowEvent::KeyboardInput {
+            event:
+                KeyEvent {
+                    physical_key: PhysicalKey::Code(KeyCode::Escape),
+                    state: ElementState::Pressed,
+                    ..
+                },
+            ..
+        } =&gt; event_loop.exit(),
+
+        WindowEvent::Resized(new_size) =&gt; gpu.ctx.resize(new_size),
+
+        WindowEvent::RedrawRequested =&gt; {
+            if let Some(frame) = gpu.ctx.acquire_frame() {
+                gpu.renderer.render(&amp;gpu.ctx, frame, &amp;self.camera);
+            }
+            gpu.ctx.window.request_redraw();   // ask for the next frame
+        }
+
+        WindowEvent::CursorMoved { position, .. } =&gt; {
+            let resolution = gpu.ctx.resolution();
+            self.controller.on_cursor_moved(position, resolution, &amp;mut self.camera);
+        }
+        WindowEvent::MouseInput { state, button, .. } =&gt; {
+            self.controller.on_mouse_button(button, state);
+        }
+        WindowEvent::MouseWheel { delta, .. } =&gt; {
+            self.controller.on_scroll(delta, &amp;mut self.camera);
+        }
+
+        WindowEvent::Occluded(false) =&gt; gpu.ctx.window.request_redraw(),
+
+        _ =&gt; {}
+    }
+}</code></pre></figure>
+    <div class="aside rust"><span class="tag">Rust — match and patterns</span>
+      <p><code>match</code> is a switch statement with superpowers. Each arm is a
+      <em>pattern</em> that can simultaneously test the shape of a value and pull data out of
+      it. Look at the Escape arm: it matches "a KeyboardInput event, whose inner key is
+      specifically Escape, in the Pressed state" — and the <code>..</code> means "and I don't
+      care about the other fields". <code>WindowEvent::Resized(new_size)</code> both matches
+      the variant <em>and</em> captures the new size into a variable. The <code>|</code>
+      combines two patterns into one arm ("close request OR escape key"). The compiler checks
+      you handled every possible variant — that's what the final <code>_ =&gt; {}</code>
+      ("anything else: do nothing") satisfies.</p>
+    </div>
+    <div class="aside rust"><span class="tag">Rust — let … else</span>
+      <p><code>let Some(gpu) = &amp;mut self.gpu else { return; }</code> reads as: "if
+      <code>self.gpu</code> contains a value, name it <code>gpu</code> and continue; otherwise
+      leave the function." It's the standard early-exit for Options.</p>
+    </div>
+    <p>Note the shape of the <code>RedrawRequested</code> arm — it's the frame loop from
+    chapter 3, in the flesh: try to get this frame's canvas; if that works, draw into it;
+    either way, ask for another go. If <code>acquire_frame</code> returned <code>None</code>,
+    the surface was mid-repair (chapter 10) and we simply skip one frame — at 165 fps, nobody
+    will ever notice.</p>
+  </div></details>
+
+  <div class="quiz"><span class="qtag">check yourself</span>
+    <details><summary>Why is <code>request_redraw()</code> called inside the redraw handler itself?</summary>
+      <p>That's what makes rendering continuous: each frame schedules the next one. Vsync (chapter 3) keeps this from spinning wildly — presenting blocks until the monitor wants a new image.</p></details>
+    <details><summary>The user mashes keys on the keyboard. Which match arm runs?</summary>
+      <p>For Escape: the exit arm. For every other key: <code>_ =&gt; {}</code> — the catch-all that does nothing. The events still arrive; we just decline to care.</p></details>
+  </div>
+</section>
+
+<!-- ============================================================ CH 8 -->
+<section class="ch" id="ch8">
+  <div class="chhead"><span class="n">08</span><h2>camera.rs — where am I looking</h2></div>
+
+  <p>This file is pure math — no winit, no wgpu, no windows. Which means it's fully
+  understandable (and fully unit-tested) on its own. The entire camera is
+  <strong>three numbers</strong>:</p>
+
+<figure class="code"><figcaption>src/camera.rs — the state<span class="lang">rust</span></figcaption>
+<pre><code class="lang-rust">pub struct Camera {
+    /// Screen position of the world origin (the scene center), in pixels from
+    /// the window center, +y up. `[0, 0]` = scene centered in the window.
+    pub pan: [f32; 2],
+    /// Pixels per world unit.
+    pub zoom: f32,
+}</code></pre></figure>
+
+  <p>And the entire world→screen mapping — the one formula this whole codebase revolves
+  around — is:</p>
+  <p style="font-family:var(--mono);font-size:17px;color:var(--gold);text-align:center;margin:24px 0">
+    screen_px&nbsp;=&nbsp;world&nbsp;×&nbsp;zoom&nbsp;+&nbsp;pan</p>
+  <p>The square's corners live at world ±0.5. With the starting <code>zoom = 400</code>
+  (pixels per world unit) and <code>pan = [0, 0]</code>, the corner (+0.5,&nbsp;+0.5) lands at
+  screen (+200,&nbsp;+200): two hundred pixels right of and above the window center. Hence: a
+  400×400 px square, dead center, in any window.</p>
+
+  <div class="aside why"><span class="tag">why though? — the no-scaling trick</span>
+    <p>You asked for "resizing must not scale or move the scene". Look at the formula: the
+    window's size <strong>appears nowhere in it</strong>. World units become pixels using only
+    zoom and pan. So when the window changes, nothing about the scene's pixel size or its
+    position relative to the window center <em>can</em> change — the resize only changes how
+    many pixels exist around the center for the world to show through. The invariant isn't
+    enforced by careful code; it's baked into the choice of coordinate system.</p>
+  </div>
+
+  <h3>Panning: embarrassingly simple</h3>
+<figure class="code"><figcaption>src/camera.rs — pan_by()<span class="lang">rust</span></figcaption>
+<pre><code class="lang-rust">pub fn pan_by(&amp;mut self, delta: [f32; 2]) {
+    self.pan[0] += delta[0];
+    self.pan[1] += delta[1];
+}</code></pre></figure>
+  <p>The mouse moved 30 px right → add 30 to <code>pan[0]</code> → every world point lands
+  30 px further right. The scene sticks to your cursor 1:1, at any zoom, because pan is
+  applied <em>after</em> the zoom multiply.</p>
+
+  <h3>Zooming: exponential, and anchored under your cursor</h3>
+<figure class="code"><figcaption>src/camera.rs — zoom_by()<span class="lang">rust</span></figcaption>
+<pre><code class="lang-rust">pub fn zoom_by(&amp;mut self, scroll_lines: f32, anchor: [f32; 2]) {
+    let new_zoom = (self.zoom * ZOOM_STEP.powf(scroll_lines)).clamp(MIN_ZOOM, MAX_ZOOM);
+    let k = new_zoom / self.zoom;
+    self.pan[0] = anchor[0] - (anchor[0] - self.pan[0]) * k;
+    self.pan[1] = anchor[1] - (anchor[1] - self.pan[1]) * k;
+    self.zoom = new_zoom;
+}</code></pre></figure>
+
+  <details class="dive"><summary>deep dive: why multiply, and where that pan formula comes from</summary><div class="body">
+    <p><strong>Why <code>ZOOM_STEP.powf(lines)</code> instead of adding?</strong> One wheel
+    notch multiplies zoom by 1.1 (10% bigger). Multiplying feels identical at every scale:
+    +10% is a visible step whether you're at zoom 4 or zoom 4000. If we <em>added</em>, say,
+    50 per notch, zooming would crawl when far out and explode when close in.
+    <code>.clamp(MIN_ZOOM, MAX_ZOOM)</code> just stops you at 0.1 and 10,000 px/unit so you
+    can't scroll into oblivion.</p>
+    <p><strong>The anchor formula, derived with actual numbers.</strong> Rule we want: the
+    world point currently under your cursor stays under your cursor while everything grows
+    around it (how every map app behaves). Say <code>zoom = 400</code>, <code>pan = [0,0]</code>,
+    and your cursor sits at <code>anchor = 100</code> px right of center. The world point
+    under it is <code>w = (100 − 0) / 400 = 0.25</code>. Now scroll one notch in:
+    <code>new_zoom = 440</code>, so <code>k = 1.1</code>.</p>
+    <p>If we changed only zoom, that world point would land at <code>0.25 × 440 = 110</code> px
+    — it slid 10 px away from your cursor. To pin it, pan must absorb the slide:
+    we need <code>0.25 × 440 + pan = 100</code>, so <code>pan = −10</code>. The formula produces
+    exactly that: <code>pan' = 100 − (100 − 0) × 1.1 = −10</code>. ✓</p>
+    <p>In general: <code>pan' = a − (a − pan) · k</code> is just "solve
+    <code>w·zoom' + pan' = a</code> for <code>pan'</code>", i.e. the world origin slides away
+    from the anchor by the same factor everything else grew by. Zoom out and <code>k &lt; 1</code>
+    — same formula pulls the scene back toward your cursor.</p>
+    <div class="aside rust"><span class="tag">Rust — struct + impl</span>
+      <p>Rust separates data from behavior: <code>struct Camera { … }</code> declares the
+      fields; a separate <code>impl Camera { … }</code> block holds its functions. Methods
+      taking <code>&amp;self</code> may only read; <code>&amp;mut self</code> (like both methods
+      here) may modify. The <code>impl Default for Camera</code> block is the same idea aimed
+      at a trait: it teaches <code>Camera</code> how to construct its starting value
+      (<code>pan [0,0]</code>, <code>zoom 400</code>), which is what
+      <code>App::default()</code> ends up calling.</p>
+    </div>
+    <div class="aside rust"><span class="tag">Rust — const</span>
+      <p><code>pub const INITIAL_ZOOM: f32 = 400.0;</code> — a named compile-time constant.
+      The file keeps all its magic numbers (<code>MIN_ZOOM</code>, <code>MAX_ZOOM</code>,
+      <code>ZOOM_STEP</code>) at the top with doc comments, so tuning the feel later is a
+      one-line edit, not a treasure hunt.</p>
+    </div>
+  </div></details>
+
+  <details class="dive"><summary>deep dive: the unit tests at the bottom of the file</summary><div class="body">
+    <p>The file ends with a <code>#[cfg(test)] mod tests { … }</code> block — five tests that
+    run with <code>cargo test</code> and are completely excluded from the real binary
+    (<code>cfg(test)</code> = "only compile this when testing").</p>
+<figure class="code"><figcaption>src/camera.rs — one of the five tests<span class="lang">rust</span></figcaption>
+<pre><code class="lang-rust">#[test]
+fn zoom_keeps_anchor_point_fixed() {
+    let mut cam = Camera { pan: [37.0, -12.0], zoom: 400.0 };
+    let anchor = [100.0, 50.0];
+    // the world point currently under the anchor...
+    let world_at_anchor = [
+        (anchor[0] - cam.pan[0]) / cam.zoom,
+        (anchor[1] - cam.pan[1]) / cam.zoom,
+    ];
+    // ...must still be under the anchor after zooming
+    cam.zoom_by(3.0, anchor);
+    let after = project(&amp;cam, world_at_anchor);
+    assert!((after[0] - anchor[0]).abs() &lt; 1e-3);
+    assert!((after[1] - anchor[1]).abs() &lt; 1e-3);
+}</code></pre></figure>
+    <p>Note what it asserts: not implementation details, but the <em>promise</em> — "the point
+    under the cursor doesn't move." The tests use a little <code>project()</code> helper that
+    mirrors the shader's formula exactly, so they test what actually reaches your eyeballs.
+    The other four cover: the 400px starting size, pan being 1:1, zoom being exponential and
+    reversible, and the clamps engaging.</p>
+    <div class="aside rust"><span class="tag">Rust — assert!</span>
+      <p><code>assert!(condition)</code> crashes the test if the condition is false. The
+      float comparisons use <code>(a − b).abs() &lt; 1e-3</code> instead of <code>==</code>
+      because floating-point math accumulates microscopic rounding errors — exact equality on
+      floats is a classic bug.</p>
+    </div>
+  </div></details>
+
+  <div class="quiz"><span class="qtag">check yourself</span>
+    <details><summary>Zoom is 800 (px per world unit). How wide is the square on screen?</summary>
+      <p>800 pixels. The square is exactly 1 world unit wide (corners at ±0.5), and zoom is the world-unit→pixel exchange rate.</p></details>
+    <details><summary>You make the window twice as wide. What happens to <code>pan</code> and <code>zoom</code>?</summary>
+      <p>Nothing. Literally nothing in <span class="file">camera.rs</span> runs on resize. That's the entire no-scaling guarantee.</p></details>
+    <details><summary>Why does zooming <em>in</em> at the top-right corner make the scene drift down-left?</summary>
+      <p>Because the anchor formula pushes the world origin <em>away</em> from the anchor by factor k: everything grows around your cursor, so the parts between cursor and center get pushed toward (and past) the center. It's the same motion Google Maps makes.</p></details>
+  </div>
+</section>
+
+<!-- ============================================================ CH 9 -->
+<section class="ch" id="ch9">
+  <div class="chhead"><span class="n">09</span><h2>input.rs — your mouse, translated</h2></div>
+
+  <p><span class="file">src/input.rs</span> owns two jobs: <strong>remember</strong> what the
+  mouse is doing (where it is, whether the left button is down), and <strong>translate</strong>
+  raw window events into the camera operations from chapter 8. It also handles a subtle,
+  bug-breeding detail: the two halves of this program disagree about which way is up.</p>
+
+  <figure class="diag">
+    <svg viewBox="0 0 760 260" role="img" aria-label="Left: winit coordinates with origin top-left and y down. Right: camera and shader coordinates with origin at window center and y up. The centered function converts between them.">
+      <defs><marker id="arr5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9aa3b8"/></marker></defs>
+      <!-- winit box -->
+      <rect x="30" y="40" width="280" height="170" rx="6" fill="none" stroke="#f2c94c"/>
+      <text x="170" y="28" fill="#f2c94c" font-family="monospace" font-size="12.5" text-anchor="middle">what winit reports</text>
+      <circle cx="30" cy="40" r="4" fill="#f2c94c"/>
+      <text x="44" y="60" fill="#9aa3b8" font-size="11">(0,0) top-left</text>
+      <line x1="30" y1="40" x2="110" y2="40" stroke="#f2c94c" stroke-width="1.5" marker-end="url(#arr5)"/>
+      <text x="118" y="44" fill="#9aa3b8" font-size="11">+x</text>
+      <line x1="30" y1="40" x2="30" y2="120" stroke="#f2c94c" stroke-width="1.5" marker-end="url(#arr5)"/>
+      <text x="38" y="128" fill="#9aa3b8" font-size="11">+y is DOWN</text>
+      <!-- camera box -->
+      <rect x="450" y="40" width="280" height="170" rx="6" fill="none" stroke="#7fb4ff"/>
+      <text x="590" y="28" fill="#7fb4ff" font-family="monospace" font-size="12.5" text-anchor="middle">what camera + shader use</text>
+      <circle cx="590" cy="125" r="4" fill="#7fb4ff"/>
+      <text x="600" y="144" fill="#9aa3b8" font-size="11">(0,0) center</text>
+      <line x1="590" y1="125" x2="670" y2="125" stroke="#7fb4ff" stroke-width="1.5" marker-end="url(#arr5)"/>
+      <text x="678" y="129" fill="#9aa3b8" font-size="11">+x</text>
+      <line x1="590" y1="125" x2="590" y2="55" stroke="#7fb4ff" stroke-width="1.5" marker-end="url(#arr5)"/>
+      <text x="598" y="60" fill="#9aa3b8" font-size="11">+y is UP</text>
+      <!-- converter -->
+      <line x1="318" y1="125" x2="442" y2="125" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr5)"/>
+      <text x="380" y="112" fill="#e7eaf2" font-family="monospace" font-size="12" text-anchor="middle">centered()</text>
+      <text x="380" y="238" fill="#9aa3b8" font-size="11.5" text-anchor="middle">cx = x − width/2      cy = height/2 − y   (the subtraction order flips the axis)</text>
+    </svg>
+    <figcaption><strong>fig. 5 — the coordinate flip.</strong> The OS counts pixels down from
+    the top-left (a habit from CRT scan order). Math and clip space put +y up. The
+    <code>centered()</code> function is the border crossing — nothing past this file ever sees
+    a top-left coordinate.</figcaption>
+  </figure>
+
+  <details class="dive"><summary>deep dive: the controller, line by line</summary><div class="body">
+<figure class="code"><figcaption>src/input.rs — the state<span class="lang">rust</span></figcaption>
+<pre><code class="lang-rust">#[derive(Default)]
+pub struct CameraController {
+    /// Last known cursor position in centered coords, or `None` until
+    /// the cursor first enters the window.
+    cursor: Option&lt;[f32; 2]&gt;,
+    left_down: bool,
+}</code></pre></figure>
+    <p>Why <code>Option</code> again? Because "where was the cursor last frame" genuinely has
+    no answer before the cursor has ever entered the window — and panning needs a
+    <em>previous</em> position to compute a delta from. Encoding "no answer yet" in the type
+    means the first-ever mouse event can't produce a garbage jump.</p>
+<figure class="code"><figcaption>src/input.rs — movement → pan<span class="lang">rust</span></figcaption>
+<pre><code class="lang-rust">pub fn on_cursor_moved(&amp;mut self, position: PhysicalPosition&lt;f64&gt;,
+                       resolution: [f32; 2], camera: &amp;mut Camera) {
+    let cursor = centered(position, resolution);
+    if let Some(prev) = self.cursor {
+        if self.left_down {
+            camera.pan_by([cursor[0] - prev[0], cursor[1] - prev[1]]);
+        }
+    }
+    self.cursor = Some(cursor);
+}</code></pre></figure>
+    <p>Read it as a story: convert to centered coordinates; if we know where the cursor
+    <em>was</em> and the left button is held, pan by the difference; either way, remember where
+    it is now. Releasing the button doesn't need special handling — <code>on_mouse_button</code>
+    just flips <code>left_down</code>, and this function stops calling <code>pan_by</code>.</p>
+<figure class="code"><figcaption>src/input.rs — wheel → zoom<span class="lang">rust</span></figcaption>
+<pre><code class="lang-rust">pub fn on_scroll(&amp;mut self, delta: MouseScrollDelta, camera: &amp;mut Camera) {
+    // Mice report LineDelta (whole notches); touchpads report PixelDelta.
+    let lines = match delta {
+        MouseScrollDelta::LineDelta(_, y) =&gt; y,
+        MouseScrollDelta::PixelDelta(p) =&gt; p.y as f32 / SCROLL_PIXELS_PER_LINE,
+    };
+    let anchor = self.cursor.unwrap_or([0.0, 0.0]);
+    camera.zoom_by(lines, anchor);
+}</code></pre></figure>
+    <div class="aside rust"><span class="tag">Rust — enums that carry data</span>
+      <p><code>MouseScrollDelta</code> is an enum whose variants <em>hold values</em>:
+      a mouse wheel sends <code>LineDelta(x, y)</code> in whole notches, a touchpad sends
+      <code>PixelDelta(position)</code> in pixels. The <code>match</code> unpacks whichever
+      arrived and normalizes both into "notches" (dividing pixels by 60, a conventional
+      notch-height). This is the Rust enum superpower: variants aren't just names, they're
+      alternative <em>shapes of data</em>, and the compiler makes you handle each shape.</p>
+    </div>
+    <p><code>self.cursor.unwrap_or([0.0, 0.0])</code> — "the cursor position, or the window
+    center if we've never seen the cursor" (possible if you scroll before ever moving the
+    mouse over the window). A graceful default instead of a crash.</p>
+  </div></details>
+
+  <div class="quiz"><span class="qtag">check yourself</span>
+    <details><summary>You move the mouse straight <em>up</em> while dragging. What sign does winit report for the y change, and what sign reaches <code>pan_by</code>?</summary>
+      <p>winit's y <em>decreases</em> (its +y is down). <code>centered()</code> flips it, so the delta reaching <code>pan_by</code> is <em>positive</em> y — matching the camera's +y-up world, and the scene follows your hand upward.</p></details>
+    <details><summary>Why does the controller store the cursor position at all, instead of using the deltas winit could give?</summary>
+      <p>Window events report absolute positions, so a delta must be computed from the remembered previous position. (winit does offer raw deltas via a separate "device event" stream, but absolute positions are also exactly what zoom-anchoring needs — one mechanism, two uses.)</p></details>
+  </div>
+</section>
+
+<!-- ============================================================ CH 10 -->
+<section class="ch" id="ch10">
+  <div class="chhead"><span class="n">10</span><h2>gpu/context.rs — the negotiation</h2></div>
+
+  <p>This file performs the creation chain from chapter 5 (fig. 4), once, at startup —
+  and then spends the rest of its life doing two humbler jobs: resizing the surface, and
+  handing out one frame at a time. It's the file that will barely ever change as the
+  simulation grows.</p>
+
+  <details class="dive"><summary>deep dive: the startup chain, in code</summary><div class="body">
+<figure class="code"><figcaption>src/gpu/context.rs — GpuContext::new(), the important middle (comments trimmed)<span class="lang">rust</span></figcaption>
+<pre><code class="lang-rust">let instance = wgpu::Instance::new(
+    wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(display_handle)),
+);
+
+let surface = instance.create_surface(window.clone()).unwrap();
+
+let adapter = instance
+    .request_adapter(&amp;wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        compatible_surface: Some(&amp;surface),   // must be able to draw to our window
+        ..Default::default()
+    })
+    .await
+    .expect("Failed to find a suitable GPU adapter");
+
+let info = adapter.get_info();
+println!("Using GPU: {} ({:?})", info.name, info.backend);
+
+let (device, queue) = adapter
+    .request_device(&amp;wgpu::DeviceDescriptor {
+        required_features: wgpu::Features::empty(),   // ask for nothing exotic
+        required_limits: wgpu::Limits::default().using_resolution(adapter.limits()),
+        ..
+    })
+    .await
+    .expect("Failed to create device");
+
+let config = surface
+    .get_default_config(&amp;adapter, size.width, size.height)
+    .unwrap();
+surface.configure(&amp;device, &amp;config);</code></pre></figure>
+    <p>Line by line, in plain words:</p>
+    <ul>
+      <li><strong>Instance</strong> — boot wgpu. The mouthful of a constructor does two mundane
+      things: lets an environment variable (<code>WGPU_BACKEND</code>) override which API to
+      use, and hands over a display handle, which helps GPU enumeration on some Linux setups.</li>
+      <li><strong>Surface</strong> — wrap our window's drawable area. Note
+      <code>window.clone()</code>: that's the <code>Arc</code> from chapter 7 sharing ownership,
+      so the surface can guarantee the window outlives it. (That guarantee is what the odd type
+      <code>Surface&lt;'static&gt;</code> in the struct declaration is about.)</li>
+      <li><strong>Adapter</strong> — "give me a physical GPU that (a) is the high-performance
+      one and (b) can actually present to this surface." On your machine: the RTX&nbsp;4080&nbsp;SUPER,
+      speaking Vulkan. The <code>println!</code> is why you see that line in the terminal.</li>
+      <li><strong>Device + Queue</strong> — open the connection. We request <em>zero</em>
+      optional features and default limits: maximum portability, and the validator holds us to
+      the strictest rules. When the gravity sim needs something fancy later, this is where
+      it gets requested.</li>
+      <li><strong>Configure the surface</strong> — the default config means: the window's size,
+      the screen's preferred pixel format, and <strong>Fifo</strong> presentation —
+      <a class="t" href="#g-vsync">vsync</a>, the frame-loop brake from chapter 3.</li>
+    </ul>
+    <div class="aside rust"><span class="tag">Rust — .await and expect</span>
+      <p>The <code>.await</code>s mark the two genuinely slow steps (driver initialization);
+      they're what makes this function <code>async</code>, and chapter 7's
+      <code>pollster::block_on</code> is what waits for them. <code>.expect("msg")</code> is
+      <code>.unwrap()</code> with a custom parting message — same "crash if this failed"
+      policy, better crash report.</p>
+    </div>
+  </div></details>
+
+  <h3>Resize: five honest lines</h3>
+<figure class="code"><figcaption>src/gpu/context.rs — resize()<span class="lang">rust</span></figcaption>
+<pre><code class="lang-rust">pub fn resize(&amp;mut self, new_size: PhysicalSize&lt;u32&gt;) {
+    self.config.width = new_size.width.max(1);    // 0-sized surfaces are illegal
+    self.config.height = new_size.height.max(1);  // (minimized window reports 0×0)
+    self.surface.configure(&amp;self.device, &amp;self.config);
+    self.window.request_redraw();
+}</code></pre></figure>
+  <p>The surface's textures must exactly match the window's size, so every resize rebuilds
+  them. Notice what's <em>absent</em>: no camera, no scale factors, no layout math. That
+  absence is the "resizing doesn't touch the scene" guarantee, enforced by having nothing
+  to enforce.</p>
+
+  <h3>acquire_frame: the paranoid doorman</h3>
+  <p>Once per frame, someone must ask the surface for "this frame's canvas" (the
+  <a class="t" href="#g-surfacetexture">surface texture</a>). The OS can refuse in several
+  ways, because the surface is the one GPU object the outside world can break — a resize
+  mid-frame, a driver reset, a lock screen. <code>acquire_frame()</code> translates all of
+  them into a simple contract for the caller: <code>Some(frame)</code> = draw,
+  <code>None</code> = skip this frame, I've already fixed things.</p>
+
+  <div class="tablewrap"><table>
+    <tr><th>wgpu says</th><th>meaning in plain words</th><th>our reaction</th></tr>
+    <tr><td><code>Success</code></td><td>Here's your canvas.</td><td>Return it. The 99.9% case.</td></tr>
+    <tr><td><code>Timeout</code></td><td>Couldn't get one fast enough (GPU busy).</td><td>Skip a frame.</td></tr>
+    <tr><td><code>Occluded</code></td><td>Window fully hidden; drawing is pointless.</td><td>Skip.</td></tr>
+    <tr><td><code>Suboptimal</code> / <code>Outdated</code></td><td>Canvas exists but no longer matches the window (classic mid-resize).</td><td>Reconfigure the surface, skip one frame.</td></tr>
+    <tr><td><code>Lost</code></td><td>The surface itself died (driver reset, display change).</td><td>Recreate it from the window, reconfigure, skip.</td></tr>
+    <tr><td><code>Validation</code></td><td>"You broke the API rules."</td><td>Unreachable for us — wgpu panics first. Marked <code>unreachable!()</code>.</td></tr>
+  </table></div>
+
+  <div class="quiz"><span class="qtag">check yourself</span>
+    <details><summary>Why is startup allowed to just crash (<code>expect</code>) while frame acquisition carefully recovers?</summary>
+      <p>At startup, failure means "this machine can't run the program" — crash loudly, nothing better exists. At frame time, failure is a routine, transient hiccup (a resize!) — recover and carry on. Same philosophy as a car: refuse to start with no engine, but don't explode at every pothole.</p></details>
+    <details><summary>What single call makes vsync happen?</summary>
+      <p><code>surface.get_default_config(…)</code> — the default present mode is Fifo. There's no separate "enable vsync" switch; it's a property of how the surface presents.</p></details>
+  </div>
+</section>
+
+<!-- ============================================================ CH 11 -->
+<section class="ch" id="ch11">
+  <div class="chhead"><span class="n">11</span><h2>gpu/renderer.rs — the drawing machine</h2></div>
+
+  <p>Everything chapter 10 built is plumbing; this file finally draws. It does two things:
+  at startup, it bakes the <a class="t" href="#g-pipeline">pipeline</a> (the "how to draw"
+  recipe); every frame, it ships the camera to the GPU and replays the recipe. The
+  interesting story is <strong>how a Rust struct becomes GPU bytes</strong> — the one place
+  the two computers from chapter 2 must agree perfectly.</p>
+
+  <h3>One struct, two languages</h3>
+<figure class="code"><figcaption>src/gpu/renderer.rs — the CPU side<span class="lang">rust</span></figcaption>
+<pre><code class="lang-rust">#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct Globals {
+    resolution: [f32; 2],
+    pan: [f32; 2],
+    zoom: f32,
+    _pad: f32,
+}</code></pre></figure>
+<figure class="code"><figcaption>src/gpu/shader.wgsl — the GPU side (must match!)<span class="lang">wgsl</span></figcaption>
+<pre><code class="lang-wgsl">struct Globals {
+    resolution: vec2&lt;f32&gt;,
+    pan: vec2&lt;f32&gt;,
+    zoom: f32,
+    _pad: f32,
+};</code></pre></figure>
+
+  <p>These are two declarations, in two languages, compiled by two different compilers,
+  describing the <strong>same 24 bytes</strong>. Nothing checks they match — if they drift
+  apart, the shader just reads garbage from the wrong offsets. Hence the paranoia below:</p>
+
+  <div class="tablewrap"><table class="bytes">
+    <tr><th style="text-align:left;padding-right:10px">byte</th>
+      <td class="b-res">0–3</td><td class="b-res">4–7</td><td class="b-pan">8–11</td>
+      <td class="b-pan">12–15</td><td class="b-zoom">16–19</td><td class="b-pad">20–23</td></tr>
+    <tr><th style="text-align:left;padding-right:10px">holds</th>
+      <td class="b-res">resolution.x</td><td class="b-res">resolution.y</td><td class="b-pan">pan.x</td>
+      <td class="b-pan">pan.y</td><td class="b-zoom">zoom</td><td class="b-pad">_pad</td></tr>
+    <tr><th style="text-align:left;padding-right:10px">e.g.</th>
+      <td class="b-res">1280.0</td><td class="b-res">720.0</td><td class="b-pan">0.0</td>
+      <td class="b-pan">0.0</td><td class="b-zoom">400.0</td><td class="b-pad">0.0</td></tr>
+  </table></div>
+  <p style="font-size:14px;color:var(--muted)">The 24 bytes as they sit in the
+  <a class="t" href="#g-uniform">uniform</a> buffer. Each cell is one <code>f32</code> = 4 bytes.</p>
+
+  <details class="dive"><summary>deep dive: the three magic attributes on that struct</summary><div class="body">
+    <div class="aside rust"><span class="tag">Rust — #[repr(C)]</span>
+      <p>By default, Rust may <em>reorder your struct fields in memory</em> for efficiency
+      — the source order is a suggestion. <code>#[repr(C)]</code> switches to C's rules:
+      fields in declared order, predictable layout. Mandatory for any struct whose raw bytes
+      another system will read.</p>
+    </div>
+    <div class="aside rust"><span class="tag">Rust — bytemuck's Pod and Zeroable</span>
+      <p>Turning a struct into bytes is trivially easy to do <em>wrong</em> (padding bytes,
+      pointers, types with invalid bit patterns). The <code>bytemuck</code> crate makes it
+      safe: deriving <code>Pod</code> ("plain old data") makes the compiler <em>prove</em> the
+      struct is nothing but plain numbers with no gaps — the derive literally fails to compile
+      if there's hidden padding. That proof is what makes
+      <code>bytemuck::bytes_of(&amp;globals)</code> (used below) a safe, zero-cost "give me
+      these 24 bytes" instead of an unsafe hack.</p>
+    </div>
+    <p><strong>And why <code>_pad</code>?</strong> WGSL's layout rules round a struct's size up
+    to a multiple of its largest member's alignment — this struct contains
+    <code>vec2</code>s (8-byte aligned), so WGSL insists the struct is 24 bytes, not 20. The
+    explicit <code>_pad: f32</code> makes both sides agree on 24 honestly, and doubles as a
+    free slot for the next field (elapsed time, probably). This kind of invisible-rule
+    mismatch is a top-3 GPU beginner bug; the comments in both files cross-reference each
+    other for exactly that reason.</p>
+  </div></details>
+
+  <details class="dive"><summary>deep dive: startup — buffer, sockets, pipeline</summary><div class="body">
+<figure class="code"><figcaption>src/gpu/renderer.rs — the uniform buffer<span class="lang">rust</span></figcaption>
+<pre><code class="lang-rust">let globals_buffer = ctx.device.create_buffer(&amp;wgpu::BufferDescriptor {
+    label: Some("globals"),
+    size: size_of::&lt;Globals&gt;() as u64,          // 24 bytes
+    usage: wgpu::BufferUsages::UNIFORM          // "shaders may read it as a uniform"
+         | wgpu::BufferUsages::COPY_DST,        // "the CPU may copy data into it"
+    mapped_at_creation: false,
+});</code></pre></figure>
+    <p>A <a class="t" href="#g-buffer">buffer</a> is just GPU memory with a size and a
+    permission list. <code>label</code>s appear in error messages — always set them.</p>
+<figure class="code"><figcaption>src/gpu/renderer.rs — socket shape, then the actual plug<span class="lang">rust</span></figcaption>
+<pre><code class="lang-rust">// The LAYOUT: "at binding 0 there will be a uniform buffer,
+// visible to the vertex stage" — the SHAPE of the socket.
+let globals_layout = ctx.device.create_bind_group_layout(&amp;wgpu::BindGroupLayoutDescriptor {
+    entries: &amp;[wgpu::BindGroupLayoutEntry {
+        binding: 0,
+        visibility: wgpu::ShaderStages::VERTEX,
+        ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, .. },
+        ..
+    }],
+    ..
+});
+
+// The GROUP: "and HERE is the actual buffer plugged into binding 0."
+let globals_bind_group = ctx.device.create_bind_group(&amp;wgpu::BindGroupDescriptor {
+    layout: &amp;globals_layout,
+    entries: &amp;[wgpu::BindGroupEntry {
+        binding: 0,
+        resource: globals_buffer.as_entire_binding(),
+    }],
+    ..
+});</code></pre></figure>
+    <div class="aside gpu"><span class="tag">GPU concept — why two objects for one buffer?</span>
+      <p>The <em>layout</em> (socket shape) is part of the pipeline's compiled interface — the
+      shader is compiled against "binding 0 is a uniform buffer". The <em>group</em> (the
+      plug) is swappable per draw without recompiling anything. With one buffer it feels like
+      bureaucracy; with a particle sim double-buffering positions every frame, swapping plugs
+      into a fixed socket is exactly what you want. The socket number here — group 0,
+      binding 0 — is the same address the shader declares with
+      <code>@group(0) @binding(0)</code>. That pair of numbers is the entire connection
+      between the two languages.</p>
+    </div>
+<figure class="code"><figcaption>src/gpu/renderer.rs — baking the pipeline (abridged)<span class="lang">rust</span></figcaption>
+<pre><code class="lang-rust">let shader = ctx.device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
+
+let pipeline = ctx.device.create_render_pipeline(&amp;wgpu::RenderPipelineDescriptor {
+    layout: Some(&amp;pipeline_layout),              // which bind group layouts exist
+    vertex: wgpu::VertexState {
+        module: &amp;shader,
+        entry_point: Some("vs_main"),            // the fn name in shader.wgsl
+        buffers: &amp;[],                            // no vertex buffers! see ch. 12
+        ..
+    },
+    fragment: Some(wgpu::FragmentState {
+        module: &amp;shader,
+        entry_point: Some("fs_main"),
+        targets: &amp;[Some(ctx.config.format.into())],  // must match the surface's format
+        ..
+    }),
+    primitive: wgpu::PrimitiveState::default(),  // default = "vertices form triangles"
+    depth_stencil: None,                         // flat 2D: no depth buffer
+    multisample: wgpu::MultisampleState::default(),
+    ..
+});</code></pre></figure>
+    <p><code>include_wgsl!</code> pastes the shader file into the executable <em>at Rust
+    compile time</em> (no file loading at runtime), and the GPU driver compiles it here, at
+    pipeline creation — a typo in the WGSL panics on this line with a pointer into the shader
+    source. The descriptor is long but every field answers a dumb question: which program?
+    ("vs_main"/"fs_main" — one file can hold many entry points) · drawing into what format? ·
+    triangles or lines? · depth sorting? (no). Baked once; every frame just says
+    "use that recipe".</p>
+  </div></details>
+
+  <details class="dive"><summary>deep dive: render() — the every-frame path</summary><div class="body">
+<figure class="code"><figcaption>src/gpu/renderer.rs — render(), condensed but complete<span class="lang">rust</span></figcaption>
+<pre><code class="lang-rust">pub fn render(&amp;self, ctx: &amp;GpuContext, frame: wgpu::SurfaceTexture, camera: &amp;Camera) {
+    // 1. CPU → GPU: this frame's camera, as 24 bytes.
+    let globals = Globals {
+        resolution: ctx.resolution(),
+        pan: camera.pan,
+        zoom: camera.zoom,
+        _pad: 0.0,
+    };
+    ctx.queue.write_buffer(&amp;self.globals_buffer, 0, bytemuck::bytes_of(&amp;globals));
+
+    // 2. Record the work (nothing executes yet).
+    let view = frame.texture.create_view(&amp;Default::default());
+    let mut encoder = ctx.device.create_command_encoder(&amp;Default::default());
+    {
+        let mut rpass = encoder.begin_render_pass(&amp;wgpu::RenderPassDescriptor {
+            color_attachments: &amp;[Some(wgpu::RenderPassColorAttachment {
+                view: &amp;view,                       // draw onto this frame's canvas
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),  // first: fill black
+                    store: wgpu::StoreOp::Store,                    // then: keep results
+                },
+                ..
+            })],
+            ..
+        });
+        rpass.set_pipeline(&amp;self.pipeline);            // use the baked recipe
+        rpass.set_bind_group(0, &amp;self.globals_bind_group, &amp;[]); // plug in the camera
+        rpass.draw(0..6, 0..1);                        // 6 vertices, 1 instance
+    } // pass ends here
+
+    // 3. Ship it.
+    ctx.queue.submit(Some(encoder.finish()));
+    ctx.window.pre_present_notify();
+    ctx.queue.present(frame);
+}</code></pre></figure>
+    <div class="aside gpu"><span class="tag">GPU concept — record, then submit</span>
+      <p>GPU work isn't issued call-by-call — that would mean thousands of tiny CPU↔GPU
+      round-trips. Instead you record everything into a
+      <a class="t" href="#g-commandencoder">command encoder</a> (a shopping list), then
+      <code>submit</code> the finished list to the <a class="t" href="#g-queue">queue</a> in
+      one go. Until <code>submit</code>, <em>nothing has happened on the GPU at all</em>.</p>
+    </div>
+    <p>The famous clear: <code>LoadOp::Clear(BLACK)</code> means "when this pass begins, wipe
+    the canvas to black". That's your black background — one enum value. And
+    <code>draw(0..6, 0..1)</code> is the entire drawing command: "run the vertex shader for
+    indices 0,1,2,3,4,5, once" (the <code>0..1</code> is the instance range — the slot that
+    becomes <code>0..100_000</code> when particles arrive). Finally
+    <code>present(frame)</code> hands the finished canvas to the OS — the moment the square
+    actually reaches glass.</p>
+  </div></details>
+
+  <div class="quiz"><span class="qtag">check yourself</span>
+    <details><summary>Which single line paints the background black?</summary>
+      <p><code>load: wgpu::LoadOp::Clear(wgpu::Color::BLACK)</code> in the render pass. Not a draw call — a "how to start the pass" setting.</p></details>
+    <details><summary>You add a <code>time: f32</code> field after <code>zoom</code> in the Rust struct but forget the WGSL side. What happens?</summary>
+      <p>It compiles fine on both sides — and the shader silently reads the wrong bytes (your new field where it expects padding, sizes now disagreeing: 28 vs 24 — wgpu's validator would actually catch <em>that</em> size mismatch at draw time and log an error… courtesy of the layout declaring a uniform binding. Subtler drifts, like swapped field order, really do just render garbage). Moral: edit these two structs as a pair, always.</p></details>
+    <details><summary>Why is it fine that <code>write_buffer</code> rewrites all 24 bytes every frame even when the camera didn't change?</summary>
+      <p>24 bytes is nothing (the GPU moves gigabytes per second), and unconditional upload means zero "did it change?" bookkeeping. When the sim ticks every frame anyway, per-frame upload is the normal pattern, not a waste.</p></details>
+  </div>
+</section>
+
+<!-- ============================================================ CH 12 -->
+<section class="ch" id="ch12">
+  <div class="chhead"><span class="n">12</span><h2>shader.wgsl — the program inside the GPU</h2></div>
+
+  <p>Everything so far was arrangements. This file is the only code that runs <em>on</em>
+  the GPU — <span class="side gpu">GPU</span> territory at last. It's ~40 real lines of
+  <a class="t" href="#g-wgsl">WGSL</a>, and it defines two tiny functions that between them
+  put the square on screen.</p>
+
+  <h3>The two stages, and the machine between them</h3>
+  <figure class="diag">
+    <svg viewBox="0 0 780 240" role="img" aria-label="Pipeline stages: draw call feeds 6 vertex shader runs, whose clip-space outputs go to the fixed-function rasterizer, which emits about 160000 fragments, each colored by a fragment shader run, written to the surface texture">
+      <defs><marker id="arr6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9aa3b8"/></marker></defs>
+      <rect x="15" y="70" width="120" height="60" rx="8" fill="#f2c94c22" stroke="#f2c94c"/>
+      <text x="75" y="96" fill="#e7eaf2" font-size="12" text-anchor="middle">draw(0..6)</text>
+      <text x="75" y="113" fill="#9aa3b8" font-size="10.5" text-anchor="middle">from renderer.rs</text>
+      <rect x="175" y="70" width="150" height="60" rx="8" fill="#7fb4ff22" stroke="#7fb4ff"/>
+      <text x="250" y="90" fill="#e7eaf2" font-family="monospace" font-size="12" text-anchor="middle">vs_main</text>
+      <text x="250" y="107" fill="#9aa3b8" font-size="10.5" text-anchor="middle">runs 6× (per vertex)</text>
+      <text x="250" y="122" fill="#9aa3b8" font-size="10.5" text-anchor="middle">out: clip position</text>
+      <rect x="365" y="70" width="150" height="60" rx="8" fill="none" stroke="#9aa3b8" stroke-dasharray="4 4"/>
+      <text x="440" y="90" fill="#e7eaf2" font-size="12" text-anchor="middle">rasterizer</text>
+      <text x="440" y="107" fill="#9aa3b8" font-size="10.5" text-anchor="middle">fixed hardware,</text>
+      <text x="440" y="122" fill="#9aa3b8" font-size="10.5" text-anchor="middle">not programmable</text>
+      <rect x="555" y="70" width="150" height="60" rx="8" fill="#7fb4ff22" stroke="#7fb4ff"/>
+      <text x="630" y="90" fill="#e7eaf2" font-family="monospace" font-size="12" text-anchor="middle">fs_main</text>
+      <text x="630" y="107" fill="#9aa3b8" font-size="10.5" text-anchor="middle">runs ~160,000×</text>
+      <text x="630" y="122" fill="#9aa3b8" font-size="10.5" text-anchor="middle">out: one color</text>
+      <line x1="137" y1="100" x2="173" y2="100" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr6)"/>
+      <line x1="327" y1="100" x2="363" y2="100" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr6)"/>
+      <text x="345" y="62" fill="#9aa3b8" font-size="10.5" text-anchor="middle">6 positions</text>
+      <line x1="517" y1="100" x2="553" y2="100" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr6)"/>
+      <text x="536" y="62" fill="#9aa3b8" font-size="10.5" text-anchor="middle">"pixel (612,388) is inside!"</text>
+      <line x1="630" y1="132" x2="630" y2="170" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr6)"/>
+      <rect x="540" y="172" width="180" height="40" rx="8" fill="#7fb4ff22" stroke="#7fb4ff"/>
+      <text x="630" y="197" fill="#e7eaf2" font-size="12" text-anchor="middle">surface texture</text>
+      <text x="260" y="196" fill="#9aa3b8" font-size="11.5">the rasterizer figures out which pixels each triangle</text>
+      <text x="260" y="212" fill="#9aa3b8" font-size="11.5">covers — that's why the two shader stages exist</text>
+    </svg>
+    <figcaption><strong>fig. 6 — one draw call flowing through the GPU.</strong> You write the
+    two blue boxes; the hardware supplies the rest. Vertex shader answers "where?", fragment
+    shader answers "what color?".</figcaption>
+  </figure>
+
+  <h3>The decorators (WGSL calls them <em>attributes</em>)</h3>
+  <p>Those <code>@word</code> markers are not decoration — each one is a contract with the
+  hardware, answering "where does this value come from / go to?". Here is every one used in
+  our shader:</p>
+
+  <div class="tablewrap"><table>
+    <tr><th>attribute</th><th>on</th><th>meaning</th></tr>
+    <tr><td><code>@vertex</code></td><td>a function</td><td>"This is a vertex-stage entry point." The Rust side selects it by name: <code>entry_point: Some("vs_main")</code>.</td></tr>
+    <tr><td><code>@fragment</code></td><td>a function</td><td>"This is a fragment-stage entry point." Same file, second entry point — one WGSL file can hold many.</td></tr>
+    <tr><td><code>@builtin(vertex_index)</code></td><td>an input</td><td>"Hardware, please fill this parameter with which vertex number this run is" — 0,1,2,3,4,5 across our six runs. Free counter, no buffer needed.</td></tr>
+    <tr><td><code>@builtin(position)</code></td><td>an output</td><td>"My return value is <em>the</em> clip-space position" — the one output the rasterizer requires from every vertex shader.</td></tr>
+    <tr><td><code>@location(0)</code></td><td>an output</td><td>"My return value goes to output wire #0" — wired to the first (only) color target the pipeline declared: the surface texture. Wire numbers, not names, connect the stages.</td></tr>
+    <tr><td><code>@group(0) @binding(0)</code></td><td>a global</td><td>"This variable is plugged in from outside, at socket group 0, binding 0" — the exact address the Rust side plugs the camera buffer into with <code>set_bind_group(0, …)</code>. This pair of numbers is the whole CPU↔GPU wiring.</td></tr>
+  </table></div>
+
+  <details class="dive"><summary>deep dive: the vertex shader, line by line</summary><div class="body">
+<figure class="code"><figcaption>src/gpu/shader.wgsl — vs_main (comments trimmed)<span class="lang">wgsl</span></figcaption>
+<pre><code class="lang-wgsl">@group(0) @binding(0)
+var&lt;uniform&gt; globals: Globals;
+
+@vertex
+fn vs_main(@builtin(vertex_index) vertex_index: u32) -&gt; @builtin(position) vec4&lt;f32&gt; {
+    var corners = array&lt;vec2&lt;f32&gt;, 6&gt;(
+        vec2&lt;f32&gt;(-1.0, -1.0),
+        vec2&lt;f32&gt;( 1.0, -1.0),
+        vec2&lt;f32&gt;( 1.0,  1.0),
+        vec2&lt;f32&gt;(-1.0, -1.0),
+        vec2&lt;f32&gt;( 1.0,  1.0),
+        vec2&lt;f32&gt;(-1.0,  1.0),
+    );
+    let world = corners[vertex_index] * 0.5;
+
+    let pixels = world * globals.zoom + globals.pan;
+    let clip = pixels * 2.0 / globals.resolution;
+    return vec4&lt;f32&gt;(clip, 0.0, 1.0);
+}</code></pre></figure>
+    <p><code>var&lt;uniform&gt; globals</code> — a global variable living in the
+    <em>uniform address space</em>: read-only, same value for all 6 runs, supplied from
+    outside via that <code>@group/@binding</code> socket. This is chapter 11's 24 bytes,
+    arriving.</p>
+    <p><strong>The no-vertex-buffer trick.</strong> Normally vertex positions stream in from a
+    buffer. For 6 fixed corners that's overkill — instead we exploit
+    <code>@builtin(vertex_index)</code>: the hardware tells us "you are run #3", and we look up
+    corner #3 in a little array written right in the code. That's why the pipeline said
+    <code>buffers: &amp;[]</code>.</p>
+
+    <figure class="diag">
+      <svg viewBox="0 0 700 250" role="img" aria-label="A square built from two triangles: triangle one uses vertex indices 0,1,2 at bottom-left, bottom-right, top-right; triangle two uses indices 3,4,5 at bottom-left, top-right, top-left; two corners are visited twice">
+        <rect x="60" y="30" width="180" height="180" fill="none" stroke="#e7eaf2" stroke-width="1.5"/>
+        <line x1="60" y1="210" x2="240" y2="30" stroke="#9aa3b8" stroke-dasharray="4 4"/>
+        <circle cx="60" cy="210" r="5" fill="#f2c94c"/><text x="38" y="232" fill="#e7eaf2" font-family="monospace" font-size="12">0,3</text>
+        <circle cx="240" cy="210" r="5" fill="#f2c94c"/><text x="250" y="232" fill="#e7eaf2" font-family="monospace" font-size="12">1</text>
+        <circle cx="240" cy="30" r="5" fill="#f2c94c"/><text x="250" y="26" fill="#e7eaf2" font-family="monospace" font-size="12">2,4</text>
+        <circle cx="60" cy="30" r="5" fill="#f2c94c"/><text x="40" y="26" fill="#e7eaf2" font-family="monospace" font-size="12">5</text>
+        <text x="105" y="185" fill="#9aa3b8" font-size="11.5">triangle A</text>
+        <text x="105" y="200" fill="#9aa3b8" font-size="11">idx 0→1→2</text>
+        <text x="130" y="65" fill="#9aa3b8" font-size="11.5">triangle B</text>
+        <text x="130" y="80" fill="#9aa3b8" font-size="11">idx 3→4→5</text>
+        <text x="360" y="80" fill="#e7eaf2" font-size="12.5">GPUs only draw triangles. A square is</text>
+        <text x="360" y="100" fill="#e7eaf2" font-size="12.5">two of them sharing a diagonal — so two</text>
+        <text x="360" y="120" fill="#e7eaf2" font-size="12.5">corners appear twice in the list (0=3, 2=4).</text>
+        <text x="360" y="152" fill="#9aa3b8" font-size="11.5">The pipeline's default "triangle list" mode</text>
+        <text x="360" y="170" fill="#9aa3b8" font-size="11.5">reads vertices in threes: (0,1,2), (3,4,5).</text>
+      </svg>
+      <figcaption><strong>fig. 7 — why 6 vertices, not 4.</strong> The corner array in the code
+      is exactly this picture, flattened.</figcaption>
+    </figure>
+
+    <p><strong>The three-line coordinate journey</strong> — with real numbers for corner
+    <code>(+0.5, +0.5)</code> at startup (window 1280×720, zoom 400, pan [0,0]):</p>
+    <div class="tablewrap"><table>
+      <tr><th>line</th><th>space</th><th>value</th><th>what happened</th></tr>
+      <tr><td><code>corners[i] * 0.5</code></td><td>world</td><td>(0.5, 0.5)</td><td>±1 template corners → the 1×1-unit square.</td></tr>
+      <tr><td><code>* zoom + pan</code></td><td>screen px</td><td>(200, 200)</td><td>The camera formula from chapter 8 — the only line the camera touches.</td></tr>
+      <tr><td><code>* 2 / resolution</code></td><td><a class="t" href="#g-clip">clip</a></td><td>(0.3125, 0.5556)</td><td>Pixels → the GPU's mandatory −1…+1 space: ±640px maps to ±1 horizontally, ±360px to ±1 vertically.</td></tr>
+    </table></div>
+    <p>And there's the no-scaling rule one final time, from the GPU's side: the window size
+    enters only in that <em>last</em> division, which cancels out exactly — a 200px offset is
+    0.3125 of a half-window when the window is 1280 wide, and 0.25 when it's 1600 wide, but
+    both land on the pixel 200 px from center. Same pixels, any window.</p>
+    <p>The returned <code>vec4</code> packs (x, y, z, w): z = 0 (flat 2D, no depth), w = 1
+    (a perspective-divide term — leave it at 1 until you do 3D).</p>
+    <div class="aside gpu"><span class="tag">WGSL — var vs let</span>
+      <p>In WGSL, <code>let</code> is an immutable value; <code>var</code> is actual
+      addressable storage. The corner array is a <code>var</code> because indexing with a
+      <em>runtime</em> value (<code>vertex_index</code>) requires the array to exist in real
+      memory, not as a compile-time value. If you write <code>let</code> there, the compiler
+      rejects it — now you know why.</p>
+    </div>
+  </div></details>
+
+  <details class="dive"><summary>deep dive: the fragment shader (all four lines of it)</summary><div class="body">
+<figure class="code"><figcaption>src/gpu/shader.wgsl — fs_main<span class="lang">wgsl</span></figcaption>
+<pre><code class="lang-wgsl">@fragment
+fn fs_main() -&gt; @location(0) vec4&lt;f32&gt; {
+    return vec4&lt;f32&gt;(1.0, 1.0, 1.0, 1.0);
+}</code></pre></figure>
+    <p>For every pixel the rasterizer found inside our two triangles, this runs once and
+    answers: <code>(red, green, blue, alpha) = (1, 1, 1, 1)</code> — fully white, fully
+    opaque. Colors are 0.0–1.0 per channel, not 0–255. All ~160,000 runs return the same
+    constant; a gravity sim will make this stage earn its keep (soft glowing particles are
+    fragment-shader work). Pixels <em>outside</em> the triangles never run it — their black
+    comes from chapter 11's clear, not from any shader.</p>
+  </div></details>
+
+  <div class="quiz"><span class="qtag">check yourself</span>
+    <details><summary>What would you change to make the square red?</summary>
+      <p>The one line of <code>fs_main</code>: <code>return vec4&lt;f32&gt;(1.0, 0.0, 0.0, 1.0);</code>. Nothing on the CPU side changes at all.</p></details>
+    <details><summary><code>@group(0) @binding(0)</code> — where do those two numbers appear on the Rust side? (Two places.)</summary>
+      <p>In <span class="file">renderer.rs</span>: the bind group layout entry declares <code>binding: 0</code>, and at draw time <code>set_bind_group(0, …)</code> supplies group 0. Numbers matching across the language boundary is the entire wiring mechanism.</p></details>
+    <details><summary>Why does the vertex shader run 6 times but the fragment shader ~160,000 times?</summary>
+      <p>Vertex runs are one per corner (6). The rasterizer then fills the area between corners — a 400×400 px square is ~160,000 covered pixels, each needing a color. Area beats corners.</p></details>
+  </div>
+</section>
+
+<!-- ============================================================ CH 13 -->
+<section class="ch" id="ch13">
+  <div class="chhead"><span class="n">13</span><h2>One frame, end to end</h2></div>
+
+  <p>The grand finale: you flick the scroll wheel one notch, zooming in. Here is
+  <em>everything</em> that happens before your eye sees it, with every file getting its
+  moment. Total elapsed time: about 8 milliseconds.</p>
+
+  <figure class="diag">
+    <svg viewBox="0 0 740 620" role="img" aria-label="Full event-to-pixels flow: OS wheel event through winit to app.rs, to input.rs, to camera.rs; next redraw: app.rs asks context.rs for a frame, renderer.rs writes the uniform and records commands, submits to the GPU where the shader runs, and presents to the screen">
+      <defs><marker id="arr7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9aa3b8"/></marker></defs>
+      <rect x="250" y="10" width="240" height="40" rx="8" fill="none" stroke="#9aa3b8"/>
+      <text x="370" y="35" fill="#e7eaf2" font-size="12" text-anchor="middle">OS: "wheel moved +1 over window"</text>
+      <line x1="370" y1="52" x2="370" y2="82" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr7)"/>
+      <text x="382" y="72" fill="#9aa3b8" font-size="10.5">winit wakes the event loop</text>
+      <rect x="250" y="84" width="240" height="40" rx="8" fill="#f2c94c22" stroke="#f2c94c"/>
+      <text x="370" y="103" fill="#e7eaf2" font-family="monospace" font-size="11.5" text-anchor="middle">app.rs: window_event(MouseWheel)</text>
+      <text x="370" y="117" fill="#9aa3b8" font-size="10" text-anchor="middle">switchboard match</text>
+      <line x1="370" y1="126" x2="370" y2="156" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr7)"/>
+      <text x="382" y="147" fill="#9aa3b8" font-size="10.5">controller.on_scroll(delta, &amp;mut camera)</text>
+      <rect x="250" y="158" width="240" height="40" rx="8" fill="#f2c94c22" stroke="#f2c94c"/>
+      <text x="370" y="177" fill="#e7eaf2" font-family="monospace" font-size="11.5" text-anchor="middle">input.rs: notches=1, anchor=cursor</text>
+      <text x="370" y="191" fill="#9aa3b8" font-size="10" text-anchor="middle">normalizes wheel, picks anchor</text>
+      <line x1="370" y1="200" x2="370" y2="230" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr7)"/>
+      <text x="382" y="221" fill="#9aa3b8" font-size="10.5">camera.zoom_by(1.0, anchor)</text>
+      <rect x="250" y="232" width="240" height="40" rx="8" fill="#f2c94c22" stroke="#f2c94c"/>
+      <text x="370" y="251" fill="#e7eaf2" font-family="monospace" font-size="11.5" text-anchor="middle">camera.rs: zoom 400 → 440</text>
+      <text x="370" y="265" fill="#9aa3b8" font-size="10" text-anchor="middle">pan adjusted so cursor point stays put</text>
+      <line x1="370" y1="274" x2="370" y2="304" stroke="#9aa3b8" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#arr7)"/>
+      <text x="382" y="295" fill="#9aa3b8" font-size="10.5">…up to ~6ms later: RedrawRequested fires</text>
+      <rect x="250" y="306" width="240" height="40" rx="8" fill="#f2c94c22" stroke="#f2c94c"/>
+      <text x="370" y="325" fill="#e7eaf2" font-family="monospace" font-size="11.5" text-anchor="middle">context.rs: acquire_frame() → canvas</text>
+      <text x="370" y="339" fill="#9aa3b8" font-size="10" text-anchor="middle">this frame's surface texture</text>
+      <line x1="370" y1="348" x2="370" y2="378" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr7)"/>
+      <rect x="250" y="380" width="240" height="54" rx="8" fill="#f2c94c22" stroke="#f2c94c"/>
+      <text x="370" y="399" fill="#e7eaf2" font-family="monospace" font-size="11.5" text-anchor="middle">renderer.rs: Globals{…, zoom: 440}</text>
+      <text x="370" y="413" fill="#9aa3b8" font-size="10" text-anchor="middle">write_buffer: 24 bytes → uniform buffer</text>
+      <text x="370" y="427" fill="#9aa3b8" font-size="10" text-anchor="middle">record: clear black · draw(0..6)</text>
+      <line x1="370" y1="436" x2="370" y2="466" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr7)"/>
+      <text x="382" y="457" fill="#9aa3b8" font-size="10.5">queue.submit(commands) — crossing to the GPU</text>
+      <rect x="250" y="468" width="240" height="54" rx="8" fill="#7fb4ff22" stroke="#7fb4ff"/>
+      <text x="370" y="487" fill="#e7eaf2" font-family="monospace" font-size="11.5" text-anchor="middle">GPU: vs_main ×6 → rasterize</text>
+      <text x="370" y="501" fill="#e7eaf2" font-family="monospace" font-size="11.5" text-anchor="middle">→ fs_main ×~194,000</text>
+      <text x="370" y="515" fill="#9aa3b8" font-size="10" text-anchor="middle">square now 440×440 px — bigger!</text>
+      <line x1="370" y1="524" x2="370" y2="554" stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#arr7)"/>
+      <text x="382" y="545" fill="#9aa3b8" font-size="10.5">queue.present(frame), waits for vsync</text>
+      <rect x="250" y="556" width="240" height="40" rx="8" fill="none" stroke="#7fb4ff"/>
+      <text x="370" y="581" fill="#e7eaf2" font-size="12" text-anchor="middle">monitor shows the new frame ✨</text>
+    </svg>
+    <figcaption><strong>fig. 8 — one wheel notch, start to finish.</strong> Gold boxes: your
+    Rust code, in call order. Blue: the GPU. Note the dashed hop — input handling and drawing
+    are <em>separate</em> events; the camera just holds the numbers in between. That
+    decoupling is why input can never tear a frame in half.</figcaption>
+  </figure>
+
+  <div class="quiz"><span class="qtag">check yourself — the final boss</span>
+    <details><summary>Trace it yourself: you drag left by 100px. Which functions run, in order, and what number changes where?</summary>
+      <p>OS → winit → <code>app.rs: window_event(CursorMoved)</code> → <code>input.rs: on_cursor_moved</code> (converts to centered coords, sees <code>left_down</code>) → <code>camera.rs: pan_by([-100, 0])</code> → <code>pan[0] -= 100</code>. Next <code>RedrawRequested</code>: <code>renderer.rs</code> writes the new pan into the 24-byte uniform, records the same clear+draw as always, submits; <code>vs_main</code> adds the new pan, the square rasterizes 100px further left; present. Nothing else changed — same pipeline, same shader, same everything.</p></details>
+    <details><summary>Where — in file and line terms — does "the scene must not scale on resize" actually live?</summary>
+      <p>Nowhere, and that's the answer: it's the <em>absence</em> of window size from the camera formula (<span class="file">camera.rs</span>) plus a <code>resize()</code> (<span class="file">gpu/context.rs</span>) that touches only the surface. The shader's final divide by resolution maps pixels to clip space 1:1 for any window. The guarantee is structural, not coded.</p></details>
+  </div>
+</section>
+
+
+<!-- ============================================================ CH 14 -->
+<section class="ch" id="ch14">
+  <div class="chhead"><span class="n">14</span><h2>Where the gravity goes</h2></div>
+  <p>Nothing in this codebase simulates anything yet — and that's the point. Here's how the
+  pieces you now understand are waiting to be used:</p>
+  <ul>
+    <li><strong>Particles will be a buffer.</strong> Just like <code>Globals</code>, but big: a
+    <a class="t" href="#g-buffer">buffer</a> with, say, 100,000 entries of <code>position + velocity + mass</code>,
+    created by the Device in <span class="file">renderer.rs</span>.</li>
+    <li><strong>Physics will be a compute shader.</strong> A third kind of shader (no vertices, no
+    pixels — just "run this function 100,000 times on this buffer"). It will read particle
+    positions, compute gravity, and write new positions — entirely on the GPU, no CPU round-trip.</li>
+    <li><strong>Drawing particles will be instancing.</strong> That second argument in
+    <code>draw(0..6, 0..1)</code> becomes <code>0..100_000</code>: "draw the same 6-vertex square
+    once per particle", with the vertex shader offsetting each copy by its particle's position.</li>
+    <li><strong>The camera is done.</strong> Pan/zoom/resize behavior applies unchanged to a
+    million particles — that's why it was built as pure math in its own file.</li>
+    <li><strong>The frame loop is the simulation clock.</strong> Each vsync tick: run compute pass,
+    then render pass. Both recorded into the same command encoder you met in chapter 11.</li>
+  </ul>
+  <p>When you're ready to build it, the only files that change meaningfully are
+  <span class="file">gpu/renderer.rs</span> (new buffers, new pipelines, one extra pass) and
+  <span class="file">gpu/shader.wgsl</span> (a <code>@compute</code> entry point next to the
+  existing two). Everything else already does its job.</p>
+</section>
+
+<!-- ============================================================ GLOSSARY -->
+<section class="ch" id="gloss">
+  <div class="chhead"><span class="n">15</span><h2>Glossary</h2></div>
+  <p>Plain-language definitions. Dotted terms all over this page jump here; use your browser's
+  Back button (or <span class="kbd">Alt</span>+<span class="kbd">←</span>) to return.</p>
+  <dl class="glossary">
+    <dt id="g-adapter">adapter</dt>
+    <dd>wgpu's word for <b>one physical GPU</b> in your machine (or a software fallback). You don't draw with it — you inspect it and request a <a class="t" href="#g-device">device</a> from it. Created in <span class="file">gpu/context.rs</span>.</dd>
+    <dt id="g-bindgroup">bind group</dt>
+    <dd>The object that says which actual <a class="t" href="#g-buffer">buffer</a> is plugged into which numbered socket a shader declared. The socket numbering is <code>@group(g) @binding(b)</code> in WGSL; the Rust side matches it with <code>set_bind_group(g, …)</code>. Its sibling, the <b>bind group layout</b>, describes only the socket's <em>shape</em> (a uniform buffer, visible to the vertex stage) — the layout is part of the pipeline; the group carries the real data.</dd>
+    <dt id="g-buffer">buffer</dt>
+    <dd>A plain block of GPU memory with a size in bytes and a list of allowed uses (<code>UNIFORM</code>, <code>COPY_DST</code>, …). No structure, no types — bytes. Both sides just have to agree on the layout (see chapter 11's byte table).</dd>
+    <dt id="g-clip">clip space / NDC</dt>
+    <dd>The coordinate system a vertex shader must output: x and y from <b>−1 to +1</b> across the viewport (left→right, bottom→top), regardless of window size. Anything outside is clipped off. Also called normalized device coordinates.</dd>
+    <dt id="g-commandencoder">command encoder</dt>
+    <dd>A recorder for GPU work. You "record" passes and copies into it; nothing executes until the finished recording is submitted to the <a class="t" href="#g-queue">queue</a>. Like writing a full shopping list instead of driving to the store per item.</dd>
+    <dt id="g-device">device</dt>
+    <dd>Your open, validated connection to a GPU. Creates every resource (buffers, pipelines, shader modules, bind groups) and checks your work. If you break the rules, the device reports errors through the logger — that's why <code>env_logger</code> exists in this project.</dd>
+    <dt id="g-fragment">fragment</dt>
+    <dd>A candidate pixel produced by the <a class="t" href="#g-rasterizer">rasterizer</a>. The <b>fragment shader</b> runs once per fragment and returns its color. In this project: "return white", ~160,000 times a frame.</dd>
+    <dt id="g-frame">frame</dt>
+    <dd>One complete image of the window. Programs like this one produce a fresh frame continuously (here: at the monitor's refresh rate). Also used for the <a class="t" href="#g-surfacetexture">surface texture</a> you draw the image into.</dd>
+    <dt id="g-instance">instance (wgpu)</dt>
+    <dd>The initialized wgpu library — the root object everything else comes from. Not to be confused with drawing "instances" (copies of geometry; see chapter 11's <code>draw</code> call).</dd>
+    <dt id="g-physpix">physical vs logical pixels</dt>
+    <dd><b>Physical</b>: actual screen dots. <b>Logical</b>: physical divided by the OS scale factor (125% scaling → 1 logical = 1.25 physical). We request the window in logical (1280×720) so it looks right on any monitor, but do all rendering math in physical.</dd>
+    <dt id="g-pipeline">pipeline (render pipeline)</dt>
+    <dd>The compiled, immutable bundle of "how to draw": vertex shader + fragment shader + output format + primitive type + blend/depth settings. Expensive to create, so it's built once at startup and reused every frame. Different look = different pipeline.</dd>
+    <dt id="g-queue">queue</dt>
+    <dd>Where command buffers are submitted for the GPU to execute, in order. Also provides <code>write_buffer</code> (small uploads) and, in wgpu 30, <code>present</code>.</dd>
+    <dt id="g-rasterizer">rasterizer</dt>
+    <dd>Fixed hardware between the two shader stages: takes each triangle's three clip-space corners and works out exactly which pixels it covers, emitting a <a class="t" href="#g-fragment">fragment</a> for each. Not programmable, extremely fast, entirely invisible in the code — but it's the reason the two shaders exist.</dd>
+    <dt id="g-shader">shader</dt>
+    <dd>A small program that runs <em>on the GPU</em>, thousands of instances in parallel. Kinds used here: <b>vertex</b> (per corner: "where does this go on screen?") and <b>fragment</b> (per pixel: "what color?"). The future physics will add <b>compute</b> (per anything: "just calculate").</dd>
+    <dt id="g-surface">surface</dt>
+    <dd>The bridge object between the window and the GPU: the drawable area, owning a small rotating set of images (<a class="t" href="#g-swapchain">swapchain</a>). Must be <em>configured</em> (size, format, present mode) before use, and re-configured on every resize.</dd>
+    <dt id="g-surfacetexture">surface texture</dt>
+    <dd>"This frame's canvas": the texture the surface hands you to draw into, which is then handed back with <code>present</code>. Acquiring it can fail in recoverable ways (window resized, GPU reset…) — <span class="file">gpu/context.rs</span> handles all of them.</dd>
+    <dt id="g-swapchain">swapchain</dt>
+    <dd>The rotating set of 2–3 images behind a surface: while the monitor shows image A, you draw into image B, then swap. The word comes from Vulkan; wgpu hides it inside the surface, but you'll meet it constantly in graphics writing.</dd>
+    <dt id="g-texture">texture</dt>
+    <dd>GPU memory organized as an image (width × height × pixel format) rather than raw bytes. What render passes draw into; also what images/sprites are stored as.</dd>
+    <dt id="g-uniform">uniform</dt>
+    <dd>Small, read-only data that is the <em>same</em> ("uniform") for every shader invocation in a draw — settings, not per-item data. Ours: window resolution + camera pan + zoom, 24 bytes, updated every frame.</dd>
+    <dt id="g-vertex">vertex</dt>
+    <dd>One corner of a shape. GPUs draw everything as triangles between vertices. Our square = 2 triangles = 6 vertex-shader runs (two corners are visited twice).</dd>
+    <dt id="g-vsync">vsync / Fifo</dt>
+    <dd>Synchronizing presentation to the monitor's refresh. In wgpu it's the <b>Fifo</b> present mode (the default, and the only one guaranteed everywhere): finished frames queue up and are shown one per refresh; when the queue is full, your program waits. Gives smooth, tear-free output and free CPU throttling.</dd>
+    <dt id="g-vulkan">Vulkan</dt>
+    <dd>One of the low-level "languages" GPUs' drivers speak (others: DirectX 12, Metal). wgpu translates our calls into whichever one your platform has — on your Windows + NVIDIA box it chose Vulkan. You never write Vulkan yourself here.</dd>
+    <dt id="g-wgsl">WGSL</dt>
+    <dd>WebGPU Shading Language — the language shaders are written in for wgpu. Rust-ish syntax, but a separate, much smaller language compiled by the GPU driver. Chapter 12 is a full tour.</dd>
+    <dt id="g-winit">winit</dt>
+    <dd>The Rust crate for windows and input: creates the window, delivers every OS event (mouse, keyboard, resize) to our <code>App</code>. Cross-platform; knows nothing about drawing.</dd>
+    <dt id="g-worldspace">world space / screen space</dt>
+    <dd><b>World space</b>: the simulation's own coordinate system, in "world units" — the square is 1×1 world units at the origin, forever, regardless of any window. <b>Screen space</b> (in this codebase): physical pixels measured from the window's <em>center</em>, +y up. The camera converts world → screen; the shader converts screen → <a class="t" href="#g-clip">clip</a>.</dd>
+  </dl>
+</section>
+
+<footer style="padding:40px 0;color:var(--faint);font-size:13px;font-family:var(--mono)">
+  gravity-sim-2d · generated for this exact commit of the codebase · if the code changes, trust the code
+</footer>
+
+</main>
+</div>
+
+<script>
+/* ---------- tiny syntax highlighter (rust / wgsl / toml) ---------- */
+(function(){
+  var KW = {
+    rust: ["fn","let","mut","pub","use","mod","struct","impl","match","if","else","return",
+           "for","in","while","loop","const","static","trait","enum","async","await","move",
+           "crate","self","Self","super","where","unsafe","dyn","true","false","as","ref"],
+    wgsl: ["struct","var","let","fn","return","array","if","else","const","uniform","private"],
+    toml: ["true","false"]
+  };
+  var PRIM = ["f32","f64","u8","u32","u64","i32","i64","usize","bool","str",
+              "vec2","vec3","vec4","mat2x2","mat4x4","u16"];
+  function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+  function highlight(text, lang){
+    var kws = KW[lang] || [];
+    var re = /(\/\/[^\n]*)|("(?:[^"\\]|\\.)*")|(#\[[^\]]*\]|@[a-z_]+(?:\([a-z_0-9]+\))?)|([A-Za-z_][A-Za-z0-9_]*!)|(\b\d[\d_]*(?:\.\d+)?\b)|(\b[A-Za-z_][A-Za-z0-9_]*\b)|([^\sA-Za-z0-9_]+|\s+)/g;
+    var out = "", m;
+    while ((m = re.exec(text)) !== null){
+      var s = m[0];
+      if (m[1]) out += '<span class="tok-com">'+esc(s)+'</span>';
+      else if (m[2]) out += '<span class="tok-str">'+esc(s)+'</span>';
+      else if (m[3]) out += '<span class="tok-attr">'+esc(s)+'</span>';
+      else if (m[4]) out += '<span class="tok-macro">'+esc(s)+'</span>';
+      else if (m[5]) out += '<span class="tok-num">'+esc(s)+'</span>';
+      else if (m[6]) {
+        var rest = text.slice(re.lastIndex);
+        if (kws.indexOf(s) >= 0) out += '<span class="tok-kw">'+esc(s)+'</span>';
+        else if (PRIM.indexOf(s) >= 0 || /^[A-Z]/.test(s)) out += '<span class="tok-ty">'+esc(s)+'</span>';
+        else if (/^\s*\(/.test(rest)) out += '<span class="tok-fn">'+esc(s)+'</span>';
+        else out += esc(s);
+      }
+      else out += esc(s);
+    }
+    return out;
+  }
+  document.querySelectorAll("pre code").forEach(function(el){
+    var lang = (el.className.match(/lang-(\w+)/)||[])[1];
+    if (!lang) return;
+    el.innerHTML = highlight(el.textContent, lang);
+  });
+})();
+
+/* ---------- sidebar scroll-spy ---------- */
+(function(){
+  var links = Array.prototype.slice.call(document.querySelectorAll("#tocList a"));
+  var map = {};
+  links.forEach(function(a){ map[a.getAttribute("href").slice(1)] = a; });
+  var obs = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if (e.isIntersecting){
+        links.forEach(function(a){ a.classList.remove("active"); });
+        var a = map[e.target.id];
+        if (a) a.classList.add("active");
+      }
+    });
+  }, {rootMargin: "-15% 0px -70% 0px"});
+  document.querySelectorAll("section.ch").forEach(function(s){ obs.observe(s); });
+})();
+
+/* ---------- expand / collapse all deep dives ---------- */
+document.getElementById("openAll").addEventListener("click", function(){
+  document.querySelectorAll("details.dive").forEach(function(d){ d.open = true; });
+});
+document.getElementById("closeAll").addEventListener("click", function(){
+  document.querySelectorAll("details.dive").forEach(function(d){ d.open = false; });
+});
+</script>
+</body>
+</html>
