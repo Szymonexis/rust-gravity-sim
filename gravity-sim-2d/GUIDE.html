@@ -825,7 +825,7 @@ pub struct App {
   <div class="chhead"><span class="n">08</span><h2>camera.rs — where am I looking</h2></div>
 
   <p>This file is pure math — no winit, no wgpu, no windows. Which means it's fully
-  understandable (and fully unit-tested) on its own. The entire camera is
+  understandable on its own. The entire camera is
   <strong>three numbers</strong>:</p>
 
 <figure class="code"><figcaption>src/camera.rs — the state<span class="lang">rust</span></figcaption>
@@ -910,39 +910,6 @@ pub struct App {
       The file keeps all its magic numbers (<code>MIN_ZOOM</code>, <code>MAX_ZOOM</code>,
       <code>ZOOM_STEP</code>) at the top with doc comments, so tuning the feel later is a
       one-line edit, not a treasure hunt.</p>
-    </div>
-  </div></details>
-
-  <details class="dive"><summary>deep dive: the unit tests at the bottom of the file</summary><div class="body">
-    <p>The file ends with a <code>#[cfg(test)] mod tests { … }</code> block — five tests that
-    run with <code>cargo test</code> and are completely excluded from the real binary
-    (<code>cfg(test)</code> = "only compile this when testing").</p>
-<figure class="code"><figcaption>src/camera.rs — one of the five tests<span class="lang">rust</span></figcaption>
-<pre><code class="lang-rust">#[test]
-fn zoom_keeps_anchor_point_fixed() {
-    let mut cam = Camera { pan: [37.0, -12.0], zoom: 400.0 };
-    let anchor = [100.0, 50.0];
-    // the world point currently under the anchor...
-    let world_at_anchor = [
-        (anchor[0] - cam.pan[0]) / cam.zoom,
-        (anchor[1] - cam.pan[1]) / cam.zoom,
-    ];
-    // ...must still be under the anchor after zooming
-    cam.zoom_by(3.0, anchor);
-    let after = project(&amp;cam, world_at_anchor);
-    assert!((after[0] - anchor[0]).abs() &lt; 1e-3);
-    assert!((after[1] - anchor[1]).abs() &lt; 1e-3);
-}</code></pre></figure>
-    <p>Note what it asserts: not implementation details, but the <em>promise</em> — "the point
-    under the cursor doesn't move." The tests use a little <code>project()</code> helper that
-    mirrors the shader's formula exactly, so they test what actually reaches your eyeballs.
-    The other four cover: the 400px starting size, pan being 1:1, zoom being exponential and
-    reversible, and the clamps engaging.</p>
-    <div class="aside rust"><span class="tag">Rust — assert!</span>
-      <p><code>assert!(condition)</code> crashes the test if the condition is false. The
-      float comparisons use <code>(a − b).abs() &lt; 1e-3</code> instead of <code>==</code>
-      because floating-point math accumulates microscopic rounding errors — exact equality on
-      floats is a classic bug.</p>
     </div>
   </div></details>
 
