@@ -11,6 +11,7 @@
 //! - drawing              → [`crate::gpu::renderer::Renderer`]
 //! - mouse controls       → [`crate::input::CameraController`]
 //! - camera state         → [`crate::camera::Camera`]
+//! - what to draw         → [`crate::scene`]
 
 use std::sync::Arc;
 
@@ -27,6 +28,7 @@ use crate::{
     camera::Camera,
     gpu::{context::GpuContext, renderer::Renderer},
     input::CameraController,
+    scene,
 };
 
 /// Initial window client size in *logical* pixels (winit multiplies by the
@@ -74,7 +76,9 @@ impl ApplicationHandler for App {
             window,
             event_loop.owned_display_handle(),
         ));
-        let renderer = Renderer::new(&ctx);
+        // The scene is plain CPU data; the renderer copies it to the GPU
+        // once and the shader reads it from there (see src/scene.rs).
+        let renderer = Renderer::new(&ctx, &scene::initial());
 
         // Kick off the redraw loop (each render requests the next redraw).
         ctx.window.request_redraw();

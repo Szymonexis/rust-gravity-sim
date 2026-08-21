@@ -11,6 +11,7 @@
 //! - WebGPU mental model: <https://webgpufundamentals.org/>
 
 use crate::camera::Camera;
+use crate::scene::Shape;
 
 use super::context::GpuContext;
 
@@ -36,14 +37,24 @@ pub struct Renderer {
     pipeline: wgpu::RenderPipeline,
     /// GPU home of [`Globals`]; rewritten every frame in [`Renderer::render`].
     globals_buffer: wgpu::Buffer,
-    /// Binds `globals_buffer` to `@group(0) @binding(0)` in the shader.
-    globals_bind_group: wgpu::BindGroup,
+    /// GPU home of the scene's [`Shape`]s, written once in [`Renderer::new`].
+    /// Kept alive because `scene_bind_group` refers to it.
+    #[allow(dead_code)]
+    shapes_buffer: wgpu::Buffer,
+    /// Binds `globals_buffer` and `shapes_buffer` to `@group(0)` in the shader.
+    scene_bind_group: wgpu::BindGroup,
+    /// How many shapes are in `shapes_buffer` — the draw call's instance count.
+    shape_count: u32,
 }
 
 impl Renderer {
-    /// Build the (one) render pipeline and the uniform plumbing.
-    /// Everything here is created once and reused every frame.
-    pub fn new(ctx: &GpuContext) -> Self {
+    /// Build the (one) render pipeline, the uniform plumbing, and the GPU copy
+    /// of `shapes`. Everything here is created once and reused every frame.
+    ///
+    /// The scene is uploaded now rather than per frame because it is static:
+    /// once the physics exists, a compute pass will update these bytes on the
+    /// GPU and the CPU will stop touching them entirely.
+    pub fn new(ctx: &GpuContext, shapes: &[Shape]) -> Self {
         // Uniform buffer. `COPY_DST` lets `queue.write_buffer` update it.
         // Not initialized here — `render` writes it before the first draw.
         let globals_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
@@ -53,35 +64,77 @@ impl Renderer {
             mapped_at_creation: false,
         });
 
+        // Storage buffer for the scene. `STORAGE` is what makes it bindable as
+        // `var<storage>`; the shader reads its length from the binding, so this
+        // is the one place the scene's size is decided. wgpu rejects zero-sized
+        // buffers, so an empty scene still reserves one slot — the draw in
+        // `render` is skipped in that case.
+        let shapes_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("shapes"),
+            size: (shapes.len().max(1) * size_of::<Shape>()) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        if !shapes.is_empty() {
+            ctx.queue
+                .write_buffer(&shapes_buffer, 0, bytemuck::cast_slice(shapes));
+        }
+
         // Bind group *layout*: the shader-visible interface (types/stages),
         // part of the pipeline's signature. The bind group below supplies the
-        // actual buffer. Separating the two lets many buffers share one
+        // actual buffers. Separating the two lets many buffers share one
         // pipeline — useful later for per-pass data.
         // https://docs.rs/wgpu/30.0.0/wgpu/struct.BindGroupLayoutDescriptor.html
-        let globals_layout = ctx
+        let scene_layout = ctx
             .device
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("globals"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    // The camera is only needed to position vertices.
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                label: Some("scene"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        // The camera is only needed to position vertices.
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                }],
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        // Vertex stage only: the vertex shader reads each
+                        // shape once and forwards kind/color to the fragment
+                        // stage, so fragments never touch the buffer.
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            // `read_only` matches `var<storage, read>` in the
+                            // shader; a writable binding would need `read: false`
+                            // and a compute pass to do the writing.
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
             });
 
-        let globals_bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("globals"),
-            layout: &globals_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: globals_buffer.as_entire_binding(),
-            }],
+        let scene_bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("scene"),
+            layout: &scene_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: globals_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    // `as_entire_binding` is what tells the shader's
+                    // runtime-sized `array<Shape>` how long it is.
+                    resource: shapes_buffer.as_entire_binding(),
+                },
+            ],
         });
 
         // `include_wgsl!` embeds the file at compile time; the WGSL is parsed
@@ -95,7 +148,7 @@ impl Renderer {
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: None,
-                bind_group_layouts: &[Some(&globals_layout)],
+                bind_group_layouts: &[Some(&scene_layout)],
                 // "Immediates" (push constants) — small data passed without a
                 // buffer. Unused.
                 immediate_size: 0,
@@ -113,8 +166,9 @@ impl Renderer {
                 vertex: wgpu::VertexState {
                     module: &shader,
                     entry_point: Some("vs_main"),
-                    // No vertex buffers: positions are generated in the
-                    // shader from `vertex_index`.
+                    // No vertex buffers: the quad's corners are generated in
+                    // the shader from `vertex_index`, and per-shape data comes
+                    // from the storage buffer rather than a vertex attribute.
                     buffers: &[],
                     compilation_options: Default::default(),
                 },
@@ -135,7 +189,9 @@ impl Renderer {
         Self {
             pipeline,
             globals_buffer,
-            globals_bind_group,
+            shapes_buffer,
+            scene_bind_group,
+            shape_count: shapes.len() as u32,
         }
     }
 
@@ -185,12 +241,14 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            rpass.set_pipeline(&self.pipeline);
-            rpass.set_bind_group(0, &self.globals_bind_group, &[]);
-            // 6 vertices (two triangles) drawn twice: instance 0 is the
-            // square, instance 1 the circle. One draw call covers both —
-            // the shader tells the instances apart via `instance_index`.
-            rpass.draw(0..6, 0..2);
+            if self.shape_count > 0 {
+                rpass.set_pipeline(&self.pipeline);
+                rpass.set_bind_group(0, &self.scene_bind_group, &[]);
+                // 6 vertices (two triangles) per shape, one instance per
+                // shape. However many shapes the scene has, this stays a
+                // single draw call — that is the point of instancing.
+                rpass.draw(0..6, 0..self.shape_count);
+            }
         } // rpass dropped here: the pass must end before the encoder finishes.
 
         ctx.queue.submit(Some(encoder.finish()));
