@@ -108,7 +108,7 @@ impl Renderer {
         let pipeline = ctx
             .device
             .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("square"),
+                label: Some("shapes"),
                 layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
                     module: &shader,
@@ -142,7 +142,7 @@ impl Renderer {
     /// Draw one frame into `frame` and present it.
     ///
     /// Flow: upload camera state → record a render pass (clear to black,
-    /// draw the square) → submit to the GPU queue → present.
+    /// draw the shapes) → submit to the GPU queue → present.
     pub fn render(&self, ctx: &GpuContext, frame: wgpu::SurfaceTexture, camera: &Camera) {
         // Refresh the uniform with this frame's camera + window size. Doing
         // it unconditionally every frame is idiomatic for real-time apps
@@ -187,8 +187,10 @@ impl Renderer {
             });
             rpass.set_pipeline(&self.pipeline);
             rpass.set_bind_group(0, &self.globals_bind_group, &[]);
-            // 6 vertices (two triangles), 1 instance — the square.
-            rpass.draw(0..6, 0..1);
+            // 6 vertices (two triangles) drawn twice: instance 0 is the
+            // square, instance 1 the circle. One draw call covers both —
+            // the shader tells the instances apart via `instance_index`.
+            rpass.draw(0..6, 0..2);
         } // rpass dropped here: the pass must end before the encoder finishes.
 
         ctx.queue.submit(Some(encoder.finish()));
