@@ -1,0 +1,6 @@
+{
+  "nixEnvSelector.nixFile": "${workspaceFolder}/shell.nix",
+  "nixEnvSelector.useFlakes": false,
+  "better-comments.tags": [],
+  "editor.tabSize": 4,
+}

@@ -1,0 +1,17 @@
+{
+	"window": {
+		"height": 800,
+		"width": 800,
+		"resizable": true
+	},
+	"zoom": {
+		"enable": true,
+		"min": 10.0,
+		"max": 10000.0,
+		"step": 1.1,
+		"initial": 50.0
+	},
+	"pan": {
+		"enable": true
+	}
+}

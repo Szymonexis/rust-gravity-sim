@@ -15,10 +15,10 @@ pkgs.mkShell {
     vulkan-loader # libvulkan.so.1 for wgpu
     libxkbcommon # keyboard handling, needed on both Wayland and X11
     wayland # libwayland-client / libwayland-cursor
-    xorg.libX11 # X11 fallback path
-    xorg.libXcursor
-    xorg.libXi
-    xorg.libXrandr
+    libX11 # X11 fallback path
+    libXcursor
+    libXi
+    libXrandr
   ]);
 
   packages = with pkgs; [
@@ -29,6 +29,7 @@ pkgs.mkShell {
     cargo
     rustfmt
     clippy
+    bacon
 
     # [graphics]: vulkaninfo / vkcube for diagnosing driver issues
     vulkan-tools
