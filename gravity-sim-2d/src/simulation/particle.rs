@@ -19,11 +19,11 @@ impl Default for Particle {
 }
 
 impl Particle {
-    pub fn new(position: [f32; 2], mass: f32, velocity: [f32; 2]) -> Self {
+    pub fn new(particle: Particle) -> Self {
         Self {
-            position,
-            mass: mass.clamp(0.0, f32::INFINITY),
-            velocity,
+            position: particle.position,
+            mass: particle.mass.clamp(0.0, f32::INFINITY),
+            velocity: particle.velocity,
         }
     }
 

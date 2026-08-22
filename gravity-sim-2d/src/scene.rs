@@ -22,10 +22,6 @@ impl Shape {
 
 const _: () = assert!(size_of::<Shape>() == 32);
 
-const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
-
 pub fn initial() -> Vec<Shape> {
-    vec![
-        Shape::circle([0.0, 0.0], 1.0, WHITE),
-    ]
+    vec![Shape::circle([0.0, 0.0], 1.0, WHITE)]
 }

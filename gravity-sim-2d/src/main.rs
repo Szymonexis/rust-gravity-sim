@@ -5,6 +5,7 @@ mod gpu;
 mod input;
 mod scene;
 mod simulation;
+mod colors;
 
 use winit::event_loop::EventLoop;
 

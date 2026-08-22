@@ -1,2 +1,3 @@
 pub mod particle;
-pub mod initializator;
+pub mod particles_generator;
+pub mod simulation;
