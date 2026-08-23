@@ -1,17 +1,49 @@
 {
+	"$schema": "./app-config.schema.json",
 	"window": {
-		"height": 800,
-		"width": 800,
+		"height": 800.0,
+		"width": 800.0,
 		"resizable": true
 	},
 	"zoom": {
 		"enable": true,
-		"min": 10.0,
+		"min": 0.1,
 		"max": 10000.0,
 		"step": 1.1,
-		"initial": 50.0
+		"initial": 10.0
 	},
 	"pan": {
 		"enable": true
+	},
+	"simulation": {
+		"tickRate": 60.0,
+		"maxCatchUpTicks": 5
+	},
+	"ui": {
+		"fontPath": "C:/Windows/Fonts/consola.ttf",
+		"fontSize": 14.0,
+		"showStats": true,
+		"showManual": true
+	},
+	"generation": {
+		"amount": 1,
+		"area": {
+			"Circle": {
+				"radius": 0.0
+			}
+		},
+		"position": "Uniform",
+		"velocity": "Stationary",
+		"mass": {
+			"Constant": {
+				"value": 1.0
+			}
+		},
+		"overlap": {
+			"Separate": {
+				"iterations": 32,
+				"padding": 0.0
+			}
+		}
 	}
 }
