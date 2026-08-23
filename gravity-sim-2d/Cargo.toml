@@ -6,7 +6,7 @@ version = "0.1.0"
 [dependencies]
 bytemuck = {version = "1.25.2", features = ["derive"]}
 env_logger = "0.11.11"
-optfield = "0.4.0"
+fontdue = "0.9"
 pollster = "1.0.1"
 rand = "0.10.2"
 serde = {version = "1.0.229", features = ["derive"]}
