@@ -1,8 +1,9 @@
-use crate::camera::Camera;
-use crate::scene::Shape;
+use crate::gpu::context::GpuContext;
+use crate::gpu::scene::Shape;
+use crate::view::Camera;
 
-use super::context::GpuContext;
-
+/// Mirrored by `Globals` in shader.wgsl. Nothing checks the two agree - if they
+/// drift apart the shader silently reads the wrong offsets.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Globals {
@@ -15,10 +16,11 @@ struct Globals {
 pub struct Renderer {
     pipeline: wgpu::RenderPipeline,
     globals_buffer: wgpu::Buffer,
-    #[allow(dead_code)]
     shapes_buffer: wgpu::Buffer,
+    scene_layout: wgpu::BindGroupLayout,
     scene_bind_group: wgpu::BindGroup,
     shape_count: u32,
+    shape_capacity: usize,
 }
 
 impl Renderer {
@@ -30,12 +32,8 @@ impl Renderer {
             mapped_at_creation: false,
         });
 
-        let shapes_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("shapes"),
-            size: (shapes.len().max(1) * size_of::<Shape>()) as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let shape_capacity = shapes.len().max(1);
+        let shapes_buffer = create_shapes_buffer(&ctx.device, shape_capacity);
         if !shapes.is_empty() {
             ctx.queue
                 .write_buffer(&shapes_buffer, 0, bytemuck::cast_slice(shapes));
@@ -69,20 +67,8 @@ impl Renderer {
                 ],
             });
 
-        let scene_bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("scene"),
-            layout: &scene_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: globals_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: shapes_buffer.as_entire_binding(),
-                },
-            ],
-        });
+        let scene_bind_group =
+            create_scene_bind_group(&ctx.device, &scene_layout, &globals_buffer, &shapes_buffer);
 
         let shader = ctx
             .device
@@ -124,12 +110,41 @@ impl Renderer {
             pipeline,
             globals_buffer,
             shapes_buffer,
+            scene_layout,
             scene_bind_group,
             shape_count: shapes.len() as u32,
+            shape_capacity,
         }
     }
 
-    pub fn render(&self, ctx: &GpuContext, frame: wgpu::SurfaceTexture, camera: &Camera) {
+    pub fn update_shapes(&mut self, ctx: &GpuContext, shapes: &[Shape]) {
+        if shapes.len() > self.shape_capacity {
+            self.shape_capacity = shapes.len().next_power_of_two();
+            self.shapes_buffer = create_shapes_buffer(&ctx.device, self.shape_capacity);
+            self.scene_bind_group = create_scene_bind_group(
+                &ctx.device,
+                &self.scene_layout,
+                &self.globals_buffer,
+                &self.shapes_buffer,
+            );
+        }
+
+        self.shape_count = shapes.len() as u32;
+        if !shapes.is_empty() {
+            ctx.queue
+                .write_buffer(&self.shapes_buffer, 0, bytemuck::cast_slice(shapes));
+        }
+    }
+
+    /// Clears the target and fills it, so this has to be the first pass of the
+    /// frame. Overlays draw into the same encoder afterwards.
+    pub fn draw(
+        &self,
+        ctx: &GpuContext,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        camera: &Camera,
+    ) {
         let globals = Globals {
             resolution: ctx.resolution(),
             pan: camera.pan,
@@ -139,18 +154,11 @@ impl Renderer {
         ctx.queue
             .write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
 
-        let view = frame
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-
-        let mut encoder = ctx
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -169,10 +177,36 @@ impl Renderer {
                 rpass.draw(0..6, 0..self.shape_count);
             }
         }
-
-        ctx.queue.submit(Some(encoder.finish()));
-
-        ctx.window.pre_present_notify();
-        ctx.queue.present(frame);
     }
+}
+
+fn create_shapes_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("shapes"),
+        size: (capacity.max(1) * size_of::<Shape>()) as u64,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
+}
+
+fn create_scene_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    globals: &wgpu::Buffer,
+    shapes: &wgpu::Buffer,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("scene"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: globals.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: shapes.as_entire_binding(),
+            },
+        ],
+    })
 }
