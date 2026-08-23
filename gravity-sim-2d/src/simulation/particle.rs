@@ -1,11 +1,8 @@
-use optfield::optfield;
-
-#[optfield(pub PartialParticle, attrs, merge_fn, from)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Particle {
-    pub position: [f32; 2],
-    pub mass: f32,
-    pub velocity: [f32; 2],
+    position: [f32; 2],
+    mass: f32,
+    velocity: [f32; 2],
 }
 
 impl Default for Particle {
@@ -19,17 +16,46 @@ impl Default for Particle {
 }
 
 impl Particle {
-    pub fn new(particle: Particle) -> Self {
+    // getters
+    pub fn position(&self) -> &[f32; 2] {
+        &self.position
+    }
+
+    pub fn mass(&self) -> &f32 {
+        &self.mass
+    }
+
+    pub fn velocity(&self) -> &[f32; 2] {
+        &self.velocity
+    }
+
+    // setters
+    pub fn set_position(&mut self, position: [f32; 2]) {
+        self.position = position;
+    }
+
+    /// Clamped here and in [`Particle::new`], the only two ways mass is ever
+    /// written, so `radius` and the mass ramp never see a negative.
+    pub fn set_mass(&mut self, mass: f32) {
+        self.mass = mass.clamp(0.0, f32::INFINITY);
+    }
+
+    pub fn set_velocity(&mut self, velocity: [f32; 2]) {
+        self.velocity = velocity;
+    }
+
+    // methods
+    pub fn new(position: [f32; 2], mass: f32, velocity: [f32; 2]) -> Self {
         Self {
-            position: particle.position,
-            mass: particle.mass.clamp(0.0, f32::INFINITY),
-            velocity: particle.velocity,
+            position,
+            mass: mass.clamp(0.0, f32::INFINITY),
+            velocity,
         }
     }
 
-    pub fn update(&self, changes: PartialParticle) -> Self {
-        let mut updated = *self;
-        updated.merge_opt(changes);
-        updated
+    /// The renderer and the overlap pass both size particles through here, so
+    /// they can't drift apart.
+    pub fn radius(&self) -> f32 {
+        self.mass.max(0.0).sqrt() * 0.5
     }
 }
