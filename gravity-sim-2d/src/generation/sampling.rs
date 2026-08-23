@@ -2,59 +2,9 @@ use std::f32::consts::{PI, TAU};
 
 use rand::{Rng, RngExt};
 
-use crate::simulation::{
-    particle::Particle,
-    particles_generator::{
-        area::Area, position_strategy::PositionStrategy, velocity_strategy::VelocityStrategy,
-    },
-};
+use crate::config::{MassStrategy, PositionStrategy, VelocityStrategy};
 
-pub const PARTICLE_RADIUS: f32 = 1.0;
-
-#[derive(Debug, Clone, Copy)]
-pub struct GeneratorConfig {
-    pub amount: usize,
-    pub area: Area,
-    pub position: PositionStrategy,
-    pub velocity: VelocityStrategy,
-    pub mass: f32,
-}
-
-impl Default for GeneratorConfig {
-    fn default() -> Self {
-        Self {
-            amount: 100,
-            area: Area::default(),
-            position: PositionStrategy::Uniform,
-            velocity: VelocityStrategy::Random { max_speed: 10.0 },
-            mass: 1.0,
-        }
-    }
-}
-
-pub fn generate_initial_particles(config: GeneratorConfig) -> Vec<Particle> {
-    let mut rng = rand::rng();
-
-    sample_positions(config.position, config.amount, &mut rng)
-        .into_iter()
-        .map(|unit| {
-            let position = config.area.from_unit_disc(unit);
-            let velocity = sample_velocity(config.velocity, position, &mut rng);
-
-            Particle::new(Particle {
-                position,
-                mass: config.mass,
-                velocity,
-            })
-        })
-        .collect()
-}
-
-fn sample_positions(
-    strategy: PositionStrategy,
-    amount: usize,
-    rng: &mut impl Rng,
-) -> Vec<[f32; 2]> {
+pub fn positions(strategy: PositionStrategy, amount: usize, rng: &mut impl Rng) -> Vec<[f32; 2]> {
     match strategy {
         PositionStrategy::Uniform => (0..amount).map(|_| uniform_unit_disc(rng)).collect(),
 
@@ -103,10 +53,45 @@ fn sample_positions(
     }
 }
 
-#[inline]
+pub fn velocity(strategy: VelocityStrategy, position: [f32; 2], rng: &mut impl Rng) -> [f32; 2] {
+    match strategy {
+        VelocityStrategy::Stationary => [0.0, 0.0],
+
+        VelocityStrategy::CommonVector { velocity } => velocity,
+
+        VelocityStrategy::Random { max_speed } => {
+            let theta = rng.random_range(0.0..TAU);
+            let speed = rng.random_range(0.0..=max_speed);
+            [speed * theta.cos(), speed * theta.sin()]
+        }
+
+        VelocityStrategy::Orbital { angular_speed } => {
+            [-angular_speed * position[1], angular_speed * position[0]]
+        }
+
+        VelocityStrategy::Radial { speed } => {
+            let len = (position[0] * position[0] + position[1] * position[1]).sqrt();
+            if len < f32::EPSILON {
+                let theta = rng.random_range(0.0..TAU);
+                [speed * theta.cos(), speed * theta.sin()]
+            } else {
+                [speed * position[0] / len, speed * position[1] / len]
+            }
+        }
+    }
+}
+
+pub fn mass(strategy: MassStrategy, rng: &mut impl Rng) -> f32 {
+    match strategy {
+        MassStrategy::Constant { value } => value,
+        MassStrategy::Random { min, max } if max > min => rng.random_range(min..max),
+        MassStrategy::Random { min, .. } => min,
+    }
+}
+
 fn uniform_unit_disc(rng: &mut impl Rng) -> [f32; 2] {
     let theta = rng.random_range(0.0..TAU);
-    let r = rng.random::<f32>().sqrt(); // sqrt -> uniform per unit of area
+    let r = rng.random::<f32>().sqrt();
     [r * theta.cos(), r * theta.sin()]
 }
 
@@ -129,7 +114,6 @@ fn standard_normal(rng: &mut impl Rng) -> f32 {
     (-2.0 * u1.ln()).sqrt() * (TAU * u2).cos()
 }
 
-#[inline]
 fn clamp_to_unit_disc(p: [f32; 2]) -> [f32; 2] {
     let len_sq = p[0] * p[0] + p[1] * p[1];
     if len_sq <= 1.0 {
@@ -137,34 +121,5 @@ fn clamp_to_unit_disc(p: [f32; 2]) -> [f32; 2] {
     } else {
         let len = len_sq.sqrt();
         [p[0] / len, p[1] / len]
-    }
-}
-
-fn sample_velocity(strategy: VelocityStrategy, position: [f32; 2], rng: &mut impl Rng) -> [f32; 2] {
-    match strategy {
-        VelocityStrategy::Stationary => [0.0, 0.0],
-
-        VelocityStrategy::CommonVector { velocity } => velocity,
-
-        VelocityStrategy::Random { max_speed } => {
-            let theta = rng.random_range(0.0..TAU);
-            let speed = rng.random_range(0.0..=max_speed);
-            [speed * theta.cos(), speed * theta.sin()]
-        }
-
-        VelocityStrategy::Orbital { angular_speed } => {
-            [-angular_speed * position[1], angular_speed * position[0]]
-        }
-
-        VelocityStrategy::Radial { speed } => {
-            let len = (position[0] * position[0] + position[1] * position[1]).sqrt();
-            if len < f32::EPSILON {
-                // dead centre has no radial direction - pick one at random
-                let theta = rng.random_range(0.0..TAU);
-                [speed * theta.cos(), speed * theta.sin()]
-            } else {
-                [speed * position[0] / len, speed * position[1] / len]
-            }
-        }
     }
 }
