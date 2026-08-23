@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use winit::{
     application::ApplicationHandler,
@@ -10,16 +11,65 @@ use winit::{
 };
 
 use crate::{
-    camera::Camera,
     config::AppConfig,
-    gpu::{context::GpuContext, renderer::Renderer},
-    input::CameraController,
-    scene,
+    generation,
+    gpu::{context::GpuContext, renderer::Renderer, scene::Scene},
+    simulation::{STEP_TICKS, SimulationHandle, World},
+    ui::{FontFace, Status, Ui},
+    view::{Camera, CameraController},
 };
+
+const TITLE: &str = "Gravity Sim 2D";
+const RATE_SAMPLE: Duration = Duration::from_secs(1);
 
 struct Gpu {
     ctx: GpuContext,
     renderer: Renderer,
+    /// `None` when no font could be loaded. The simulation is still perfectly
+    /// usable without a readout, so a missing font isn't fatal.
+    ui: Option<Ui>,
+}
+
+struct RateMeter {
+    started: Instant,
+    frames: u32,
+    ticks: i64,
+    fps: f32,
+    tps: f32,
+}
+
+impl RateMeter {
+    fn new() -> Self {
+        Self {
+            started: Instant::now(),
+            frames: 0,
+            ticks: 0,
+            fps: 0.0,
+            tps: 0.0,
+        }
+    }
+
+    /// Returns whether the rates were refreshed this call. Ticks are signed, so
+    /// a world running backwards reports a negative tick rate rather than
+    /// wrapping around.
+    fn sample(&mut self, ticks: i64) -> bool {
+        self.frames += 1;
+
+        let elapsed = self.started.elapsed();
+        if elapsed < RATE_SAMPLE {
+            return false;
+        }
+
+        let seconds = elapsed.as_secs_f32();
+        self.fps = self.frames as f32 / seconds;
+        self.tps = (ticks - self.ticks) as f32 / seconds;
+
+        self.started = Instant::now();
+        self.frames = 0;
+        self.ticks = ticks;
+
+        true
+    }
 }
 
 pub struct App<'a> {
@@ -27,16 +77,121 @@ pub struct App<'a> {
     gpu: Option<Gpu>,
     camera: Camera,
     controller: CameraController,
+    scene: Scene,
+    simulation: SimulationHandle,
+    rates: RateMeter,
+    /// Loaded before the window exists so a bad path is reported at startup,
+    /// and taken once the gpu context can turn it into an atlas.
+    font: Option<FontFace>,
 }
 
 impl<'a> App<'a> {
     pub fn new(config: &'a AppConfig) -> Self {
+        let particles = generation::generate(config.generation);
+        let scene = Scene::init(&particles);
+
         Self {
             config,
             gpu: None,
             camera: Camera::new(config),
             controller: CameraController::new(config),
+            scene,
+            // From here on the simulation owns the particles and runs on its
+            // own clock. It is already ticking before the window exists, and
+            // keeps ticking while the window is minimised or occluded.
+            simulation: SimulationHandle::spawn(config.simulation, World::new(particles)),
+            rates: RateMeter::new(),
+            font: FontFace::load(config.ui.font_path.as_deref()),
         }
+    }
+
+    fn on_key(&mut self, code: KeyCode, repeat: bool, event_loop: &ActiveEventLoop) {
+        match code {
+            KeyCode::Escape => event_loop.exit(),
+
+            // Held keys repeat, which is what you want for winding the speed up
+            // but not for a toggle.
+            KeyCode::Space if !repeat => self.simulation.toggle_pause(),
+
+            // Paused, the arrows walk the world by hand; running, they set how
+            // fast and which way it walks itself.
+            KeyCode::ArrowRight => {
+                if self.simulation.is_paused() {
+                    self.simulation.step(STEP_TICKS);
+                } else {
+                    self.simulation.faster();
+                }
+            }
+            KeyCode::ArrowLeft => {
+                if self.simulation.is_paused() {
+                    self.simulation.step(-STEP_TICKS);
+                } else {
+                    self.simulation.slower();
+                }
+            }
+
+            _ => {}
+        }
+    }
+
+    fn redraw(&mut self) {
+        let Some(gpu) = &mut self.gpu else {
+            return;
+        };
+
+        if let Some(particles) = self.simulation.try_recv() {
+            self.scene.sync(particles);
+            gpu.renderer.update_shapes(&gpu.ctx, &self.scene.shapes);
+        }
+
+        if self.rates.sample(self.simulation.tick()) {
+            let (fps, tps) = (self.rates.fps, self.rates.tps);
+            gpu.ctx
+                .window
+                .set_title(&format!("{TITLE} - {fps:.0} fps / {tps:.0} tps"));
+        }
+
+        if let Some(ui) = &mut gpu.ui {
+            ui.prepare(
+                &gpu.ctx,
+                &Status {
+                    particles: self.scene.shapes.len(),
+                    tick: self.simulation.tick(),
+                    fps: self.rates.fps,
+                    tps: self.rates.tps,
+                    zoom: self.camera.zoom,
+                    pan: self.camera.pan,
+                    paused: self.simulation.is_paused(),
+                    speed: self.simulation.speed(),
+                },
+            );
+        }
+
+        if let Some(frame) = gpu.ctx.acquire_frame() {
+            let view = frame
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
+
+            // One encoder for both passes: the scene clears the target, the ui
+            // loads it back and draws over the top.
+            let mut encoder = gpu
+                .ctx
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+            gpu.renderer
+                .draw(&gpu.ctx, &mut encoder, &view, &self.camera);
+            if let Some(ui) = &gpu.ui {
+                ui.draw(&mut encoder, &view);
+            }
+
+            gpu.ctx.queue.submit(Some(encoder.finish()));
+
+            gpu.ctx.window.pre_present_notify();
+            gpu.ctx.queue.present(frame);
+        }
+
+        gpu.ctx.window.request_redraw();
     }
 }
 
@@ -48,7 +203,7 @@ impl ApplicationHandler for App<'_> {
 
         let window_config = &self.config.window;
         let attributes = Window::default_attributes()
-            .with_title("Gravity Sim 2D")
+            .with_title(TITLE)
             .with_inner_size(LogicalSize::new(
                 window_config.width as f64,
                 window_config.height as f64,
@@ -60,37 +215,59 @@ impl ApplicationHandler for App<'_> {
                 .expect("Failed to create window"),
         );
 
+        let scale = window.scale_factor() as f32;
         let ctx = pollster::block_on(GpuContext::new(window, event_loop.owned_display_handle()));
-        let renderer = Renderer::new(&ctx, &scene::initial());
+        let renderer = Renderer::new(&ctx, &self.scene.shapes);
+        let ui = self
+            .font
+            .take()
+            .map(|face| Ui::new(&ctx, &self.config.ui, face, scale));
 
         ctx.window.request_redraw();
-        self.gpu = Some(Gpu { ctx, renderer });
+        self.gpu = Some(Gpu { ctx, renderer, ui });
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        if self.gpu.is_none() {
+            return;
+        }
+
+        match event {
+            WindowEvent::CloseRequested => event_loop.exit(),
+
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        physical_key: PhysicalKey::Code(code),
+                        state: ElementState::Pressed,
+                        repeat,
+                        ..
+                    },
+                ..
+            } => self.on_key(code, repeat, event_loop),
+
+            WindowEvent::RedrawRequested => self.redraw(),
+
+            _ => self.on_window_event(event),
+        }
+    }
+}
+
+impl App<'_> {
+    /// The rest of the events, split out only so the borrow of `self.gpu` stays
+    /// inside one arm instead of straddling the whole match.
+    fn on_window_event(&mut self, event: WindowEvent) {
         let Some(gpu) = &mut self.gpu else {
             return;
         };
 
         match event {
-            WindowEvent::CloseRequested
-            | WindowEvent::KeyboardInput {
-                event:
-                    KeyEvent {
-                        physical_key: PhysicalKey::Code(KeyCode::Escape),
-                        state: ElementState::Pressed,
-                        ..
-                    },
-                ..
-            } => event_loop.exit(),
-
             WindowEvent::Resized(new_size) => gpu.ctx.resize(new_size),
 
-            WindowEvent::RedrawRequested => {
-                if let Some(frame) = gpu.ctx.acquire_frame() {
-                    gpu.renderer.render(&gpu.ctx, frame, &self.camera);
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                if let Some(ui) = &mut gpu.ui {
+                    ui.set_scale(&gpu.ctx, scale_factor as f32);
                 }
-                gpu.ctx.window.request_redraw();
             }
 
             WindowEvent::CursorMoved { position, .. } => {
