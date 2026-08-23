@@ -64,7 +64,7 @@ impl Default for Area {
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 pub enum PositionStrategy {
     Uniform,
-    Gaussian { standard_deviation: f32 },
+    Gaussian { spread: f32 },
     Ring { inner_fraction: f32 },
     Sunflower,
     Clusters { count: usize, spread: f32 },

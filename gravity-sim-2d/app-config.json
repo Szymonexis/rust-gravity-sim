@@ -20,29 +20,38 @@
 		"maxCatchUpTicks": 5
 	},
 	"ui": {
-		"fontPath": "C:/Windows/Fonts/consola.ttf",
+		"fontPath": null,
 		"fontSize": 14.0,
 		"showStats": true,
 		"showManual": true
 	},
 	"generation": {
-		"amount": 1,
+		"amount": 100,
 		"area": {
 			"Circle": {
-				"radius": 0.0
+				"radius": 100.0
 			}
 		},
-		"position": "Uniform",
-		"velocity": "Stationary",
+		"position": {
+			"Gaussian": {
+				"spread": 1.9
+			}
+		},
+		"velocity": {
+			"Orbital": {
+				"angular_speed": 0.5
+			}
+		},
 		"mass": {
-			"Constant": {
-				"value": 1.0
+			"Random": {
+				"min": 1.0,
+				"max": 2.5
 			}
 		},
 		"overlap": {
 			"Separate": {
 				"iterations": 32,
-				"padding": 0.0
+				"padding": 0.1
 			}
 		}
 	}

@@ -9,7 +9,7 @@ const RUNNING: ColorRGBA = [0.42, 0.85, 0.52, 1.0];
 const PAUSED: ColorRGBA = [1.00, 0.74, 0.25, 1.0];
 
 /// Width of the label column, in characters. Lines up exactly only under a
-/// monospaced font, which every entry in the fallback list is.
+/// monospaced font, which the bundled fallback is.
 const LABEL_WIDTH: usize = 12;
 
 /// A flat snapshot of everything the overlay reads. Copying it once per frame
@@ -45,7 +45,7 @@ pub fn stats(status: &Status) -> Panel {
 }
 
 /// Right corner: what you are doing to it, and how to do more.
-pub fn playback(status: &Status, show_manual: bool) -> Panel {
+pub fn playback(status: &Status, show_manual: bool, config_file: Option<&str>) -> Panel {
     let mut panel = Panel::default();
 
     panel.push(if status.paused {
@@ -73,6 +73,16 @@ pub fn playback(status: &Status, show_manual: bool) -> Panel {
             },
         ));
         panel.push(entry("esc", "quit"));
+
+        // Everything the sim starts with - particle count, window, colours,
+        // this font - comes out of that file. Nothing in here edits it, so the
+        // overlay says where it is and leaves the rest to the user's editor.
+        if let Some(path) = config_file {
+            panel.blank();
+            panel.push(heading("SETTINGS"));
+            panel.push(Line::default().span(path, VALUE));
+            panel.push(Line::default().span("edit it, then restart", LABEL));
+        }
     }
 
     panel
