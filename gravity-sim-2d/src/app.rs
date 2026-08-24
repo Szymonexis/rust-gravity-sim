@@ -91,15 +91,15 @@ impl<'a> App<'a> {
         let scene = Scene::init(&particles);
 
         Self {
+            // From here on the simulation owns the particles and runs on its
+            // own clock. It is already ticking before the window exists, and
+            // keeps ticking while the window is minimised or occluded.
+            simulation: SimulationHandle::spawn(config.simulation, World::new(particles)),
             config,
             gpu: None,
             camera: Camera::new(config),
             controller: CameraController::new(config),
             scene,
-            // From here on the simulation owns the particles and runs on its
-            // own clock. It is already ticking before the window exists, and
-            // keeps ticking while the window is minimised or occluded.
-            simulation: SimulationHandle::spawn(config.simulation, World::new(particles)),
             rates: RateMeter::new(),
             font: FontFace::load(config.ui.font_path.as_deref()),
         }
