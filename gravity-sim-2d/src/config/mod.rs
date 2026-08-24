@@ -2,6 +2,7 @@ mod generation;
 mod pan;
 mod partial;
 mod simulation;
+mod store;
 mod ui;
 mod window;
 mod zoom;
@@ -14,8 +15,6 @@ pub use simulation::SimulationConfig;
 pub use ui::UiConfig;
 pub use window::WindowConfig;
 pub use zoom::ZoomConfig;
-
-use std::{fs, path::PathBuf};
 
 use serde_json::{Map, Value};
 
@@ -58,41 +57,32 @@ impl FromJsonObject for AppConfig {
     }
 }
 
-fn config_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("app-config.json")
-}
-
-pub fn load() -> AppConfig {
-    let path = config_path();
-
-    let contents = match fs::read_to_string(&path) {
-        Ok(contents) => contents,
-        Err(err) => {
-            eprintln!(
-                "couldn't read config at {}: {err}; using defaults",
-                path.display()
-            );
-            return AppConfig::default();
-        }
+/// Reads the settings, seeding the user's home directory with a copy of the
+/// shipped defaults the first time the app runs. The second half of the pair is
+/// the `~`-shortened path for the overlay to point at - `None` when no file
+/// could be reached and the compiled-in defaults stood in for it.
+pub fn load() -> (AppConfig, Option<String>) {
+    let file = store::open();
+    let (contents, origin) = match &file {
+        Some(file) => (file.contents.as_str(), file.path.display().to_string()),
+        None => (store::template(), "the built-in defaults".to_owned()),
     };
 
-    match serde_json::from_str(&contents) {
+    println!("Using config: {origin}");
+
+    let config = match serde_json::from_str(contents) {
         Ok(Value::Object(root)) => AppConfig::from_json_object(&root, ""),
 
         Ok(_) => {
-            eprintln!(
-                "config at {} isn't a json object; using defaults",
-                path.display()
-            );
+            eprintln!("config: {origin} isn't a json object; using defaults");
             AppConfig::default()
         }
 
         Err(err) => {
-            eprintln!(
-                "invalid json in config at {}: {err}; using defaults",
-                path.display()
-            );
+            eprintln!("config: invalid json in {origin} ({err}); using defaults");
             AppConfig::default()
         }
-    }
+    };
+
+    (config, file.map(|file| file.display))
 }

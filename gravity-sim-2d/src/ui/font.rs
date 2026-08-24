@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use fontdue::{Font, FontSettings};
 
@@ -21,32 +21,12 @@ const ATLAS_WIDTH: u32 = 512;
 /// can't reach into the one packed next to it.
 const GUTTER: u32 = 1;
 
-/// Fonts that ship with the OS. Tried in order when the config names none, or
-/// names one that won't load.
-#[cfg(target_os = "windows")]
-const FALLBACKS: &[&str] = &[
-    r"C:\Windows\Fonts\consola.ttf",
-    r"C:\Windows\Fonts\segoeui.ttf",
-    r"C:\Windows\Fonts\arial.ttf",
-];
-
-#[cfg(target_os = "macos")]
-const FALLBACKS: &[&str] = &[
-    "/System/Library/Fonts/SFNSMono.ttf",
-    "/System/Library/Fonts/Supplemental/Andale Mono.ttf",
-    "/System/Library/Fonts/Supplemental/Arial.ttf",
-    "/Library/Fonts/Arial.ttf",
-];
-
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
-const FALLBACKS: &[&str] = &[
-    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-    "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
-    "/usr/share/fonts/dejavu/DejaVuSansMono.ttf",
-    "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
-    "/usr/share/fonts/liberation-mono/LiberationMono-Regular.ttf",
-    "/usr/share/fonts/truetype/freefont/FreeMono.ttf",
-];
+/// The font the app falls back on when the config names none, or names one
+/// that won't load. Compiled into the executable rather than read from disk, so
+/// it is there whatever machine the binary lands on, and whatever directory it
+/// is started from.
+const BUNDLED: &[u8] = include_bytes!("../../JetBrains_Mono/JetBrainsMono-VariableFont_wght.ttf");
+const BUNDLED_NAME: &str = "JetBrains Mono (bundled)";
 
 /// Where one glyph sits in the atlas, and how to place it on a line.
 #[derive(Clone, Copy, Default)]
@@ -61,41 +41,45 @@ struct Glyph {
 /// A parsed font file, still at no particular size.
 pub struct FontFace {
     font: Font,
-    pub source: PathBuf,
+    /// Where the face came from - a path, or the name of the bundled one.
+    pub source: String,
 }
 
 impl FontFace {
-    pub fn load(configured: Option<&str>) -> Option<Self> {
+    /// Never fails. The configured font is a preference; the one it falls back
+    /// to is part of the binary, so there is always a face to draw with.
+    pub fn load(configured: Option<&str>) -> Self {
         if let Some(path) = configured {
             match Self::read(Path::new(path)) {
-                Ok(face) => return Some(face),
+                Ok(face) => return face,
                 Err(err) => eprintln!(
                     "ui: couldn't load the configured font `{path}` ({err}); \
-                     falling back to a system one"
+                     falling back to the bundled one"
                 ),
             }
         }
 
-        if let Some(face) = FALLBACKS
-            .iter()
-            .find_map(|candidate| Self::read(Path::new(candidate)).ok())
-        {
-            return Some(face);
-        }
+        Self::bundled()
+    }
 
-        eprintln!("ui: found no usable font (tried {FALLBACKS:?}); the overlay stays off");
-        None
+    fn bundled() -> Self {
+        Self {
+            font: Self::parse(BUNDLED).expect("the bundled font is compiled in, and parses"),
+            source: BUNDLED_NAME.to_owned(),
+        }
     }
 
     fn read(path: &Path) -> Result<Self, String> {
         let bytes = fs::read(path).map_err(|err| err.to_string())?;
-        let font =
-            Font::from_bytes(bytes.as_slice(), FontSettings::default()).map_err(str::to_owned)?;
 
         Ok(Self {
-            font,
-            source: path.to_path_buf(),
+            font: Self::parse(&bytes)?,
+            source: path.display().to_string(),
         })
+    }
+
+    fn parse(bytes: &[u8]) -> Result<Font, String> {
+        Font::from_bytes(bytes, FontSettings::default()).map_err(str::to_owned)
     }
 
     /// Rasterise every covered character at `px` and shelf-pack the results

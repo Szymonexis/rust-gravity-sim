@@ -254,8 +254,8 @@ sup{color:var(--faint)}
 
   <p>When you run <code>cargo run</code>, this program does five things:</p>
   <ol>
-    <li><strong>Reads a config file</strong> &mdash; <span class="file">app-config.json</span>, sitting next to
-    <span class="file">Cargo.toml</span>. Window size, zoom limits, how many particles to make and where, how fast the
+    <li><strong>Reads a config file</strong> &mdash; <span class="file">~/.config/gravity-sim-2d/app-config.json</span>,
+    written for you the first time you run. Window size, zoom limits, how many particles to make and where, how fast the
     simulation ticks. Anything missing or broken falls back to a default <em>on its own</em>, so one bad line never
     costs you the rest of the file.</li>
     <li><strong>Builds a cloud of particles</strong> &mdash; sampled into a shape you choose (disc, ring, clusters,
@@ -622,7 +622,7 @@ sup{color:var(--faint)}
     <tr><td><span class="file">config/</span></td>
       <td>Turning <span class="file">app-config.json</span> into typed Rust values, one key at a time, never failing.</td>
       <td><code>mod.rs</code> <code>partial.rs</code> <code>window.rs</code> <code>zoom.rs</code> <code>pan.rs</code>
-      <code>simulation.rs</code> <code>generation.rs</code> <code>ui.rs</code></td></tr>
+      <code>simulation.rs</code> <code>generation.rs</code> <code>ui.rs</code> <code>store.rs</code></td></tr>
     <tr><td><span class="file">simulation/</span></td>
       <td>The <code>Particle</code> type, the <code>World</code> that ticks it, the thread that owns the world, and
       the speed ladder the arrow keys walk.</td>
@@ -660,8 +660,8 @@ sup{color:var(--faint)}
   <h3>Project plumbing (the non-code files)</h3>
   <div class="tablewrap"><table>
     <tr><th>file</th><th>what it is</th></tr>
-    <tr><td><span class="file">app-config.json</span></td><td>Every knob the program exposes. Read once at startup; every key optional.</td></tr>
-    <tr><td><span class="file">app-config.schema.json</span></td><td>A JSON Schema describing that file, so your editor autocompletes keys and flags typos. Referenced by the <code>$schema</code> line at the top of the config. The loader ignores it.</td></tr>
+    <tr><td><span class="file">app-config.json</span></td><td>Every knob the program exposes. The copy here is the template: <code>include_str!</code> bakes it into the binary, which writes it to <span class="file">~/.config/gravity-sim-2d/</span> on a machine that hasn't got one yet. That copy is the one the program reads at startup; every key optional.</td></tr>
+    <tr><td><span class="file">app-config.schema.json</span></td><td>A JSON Schema describing that file, so your editor autocompletes keys and flags typos. Referenced by the <code>$schema</code> line at the top of the config. Copied out alongside it &mdash; and unlike the config, overwritten whenever the binary's copy differs, since it describes what <em>this</em> build understands. The loader ignores it.</td></tr>
     <tr><td><span class="file">Cargo.toml</span></td><td>The project manifest: name, Rust edition, and the nine dependencies from chapter 1. Rust's equivalent of <code>package.json</code>.</td></tr>
     <tr><td><span class="file">Cargo.lock</span></td><td>Auto-generated: the <em>exact</em> version of every crate so builds are reproducible. Never edited by hand.</td></tr>
     <tr><td><span class="file">target/</span></td><td>Build output. Machine-generated, gigabytes over time, safely deletable, git-ignored.</td></tr>
@@ -802,6 +802,12 @@ fn main() {
   </div></details>
 
   <h3>The config file</h3>
+  <p>It lives at <span class="file">~/.config/gravity-sim-2d/app-config.json</span> &mdash; the same path on Linux,
+  macOS and Windows, rather than each platform's own settings folder, so there is one place to look when an edit
+  isn't taking effect. You don't have to create it: <span class="file">config/store.rs</span> carries a copy of the
+  template in the binary and writes it out, schema and all, the first time the program runs. After that it is yours;
+  the program never writes over it again.</p>
+
   <p>Here it is in full &mdash; every knob the program has:</p>
 <figure class="code"><figcaption>app-config.json<span class="lang">json</span></figcaption>
 <pre><code class="lang-json">{
@@ -2262,7 +2268,7 @@ pub fn from_unit_disc(self, p: [f32; 2]) -&gt; [f32; 2] {
   <div class="tablewrap"><table>
     <tr><th>position strategy</th><th>what it looks like</th></tr>
     <tr><td><code>"Uniform"</code></td><td>Even coverage per unit of <em>area</em>. Note the <code>sqrt</code> in the sampler &mdash; without it you get a clump in the middle (see the deep dive).</td></tr>
-    <tr><td><code>{"Gaussian": {"standard_deviation": 0.3}}</code></td><td>A soft blob at the centre, thinning outward. Resampled up to 64 times until a point lands inside the disc.</td></tr>
+    <tr><td><code>{"Gaussian": {"spread": 0.3}}</code></td><td>A soft blob at the centre, thinning outward. Resampled up to 64 times until a point lands inside the disc.</td></tr>
     <tr><td><code>{"Ring": {"inner_fraction": 0.6}}</code></td><td>An annulus &mdash; uniform between 60% and 100% of the radius, empty in the middle.</td></tr>
     <tr><td><code>"Sunflower"</code></td><td>A deterministic golden-angle spiral. No randomness at all, and no clumping &mdash; the most evenly spread option there is.</td></tr>
     <tr><td><code>{"Clusters": {"count": 4, "spread": 0.1}}</code></td><td>Four gaussian blobs at random centres. The one setting most likely to trip the "too crowded" warning.</td></tr>

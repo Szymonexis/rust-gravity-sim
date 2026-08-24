@@ -110,7 +110,7 @@
 				"fontPath": {
 					"type": ["string", "null"],
 					"default": null,
-					"description": "Absolute path to a .ttf or .otf file. Forward slashes work on Windows too, and save you escaping every backslash. Null - or a path that won't load - falls back to a font that ships with the OS (Consolas, DejaVu Sans Mono, SF Mono, in that spirit)."
+					"description": "Absolute path to a .ttf or .otf file. Forward slashes work on Windows too, and save you escaping every backslash. Null - or a path that won't load - falls back to JetBrains Mono, which ships with the app."
 				},
 				"fontSize": {
 					"type": "number",
@@ -270,9 +270,9 @@
 						"Gaussian": {
 							"type": "object",
 							"additionalProperties": false,
-							"required": ["standard_deviation"],
+							"required": ["spread"],
 							"properties": {
-								"standard_deviation": {
+								"spread": {
 									"type": "number",
 									"description": "Spread as a fraction of the disc radius. Raised to 1e-4 if smaller."
 								}

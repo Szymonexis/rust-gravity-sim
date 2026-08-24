@@ -5,7 +5,7 @@ use crate::config::partial::{FromJsonObject, leaf, warn_unknown_keys};
 #[derive(Debug, Clone)]
 pub struct UiConfig {
     /// Absolute path to a `.ttf`/`.otf` file. `None` - or anything that fails
-    /// to load - falls through to the platform's own fonts.
+    /// to load - falls through to the JetBrains Mono that ships with the app.
     pub font_path: Option<String>,
     pub font_size: f32,
     pub show_stats: bool,

@@ -8,8 +8,8 @@ pub fn positions(strategy: PositionStrategy, amount: usize, rng: &mut impl Rng) 
     match strategy {
         PositionStrategy::Uniform => (0..amount).map(|_| uniform_unit_disc(rng)).collect(),
 
-        PositionStrategy::Gaussian { standard_deviation } => (0..amount)
-            .map(|_| gaussian_unit_disc(standard_deviation, rng))
+        PositionStrategy::Gaussian { spread } => (0..amount)
+            .map(|_| gaussian_unit_disc(spread, rng))
             .collect(),
 
         PositionStrategy::Ring { inner_fraction } => {

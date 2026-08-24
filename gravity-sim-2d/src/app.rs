@@ -25,9 +25,7 @@ const RATE_SAMPLE: Duration = Duration::from_secs(1);
 struct Gpu {
     ctx: GpuContext,
     renderer: Renderer,
-    /// `None` when no font could be loaded. The simulation is still perfectly
-    /// usable without a readout, so a missing font isn't fatal.
-    ui: Option<Ui>,
+    ui: Ui,
 }
 
 struct RateMeter {
@@ -83,10 +81,12 @@ pub struct App<'a> {
     /// Loaded before the window exists so a bad path is reported at startup,
     /// and taken once the gpu context can turn it into an atlas.
     font: Option<FontFace>,
+    /// Where the settings were read from, for the overlay to point at.
+    config_file: Option<&'a str>,
 }
 
 impl<'a> App<'a> {
-    pub fn new(config: &'a AppConfig) -> Self {
+    pub fn new(config: &'a AppConfig, config_file: Option<&'a str>) -> Self {
         let particles = generation::generate(config.generation);
         let scene = Scene::init(&particles);
 
@@ -101,7 +101,8 @@ impl<'a> App<'a> {
             controller: CameraController::new(config),
             scene,
             rates: RateMeter::new(),
-            font: FontFace::load(config.ui.font_path.as_deref()),
+            font: Some(FontFace::load(config.ui.font_path.as_deref())),
+            config_file,
         }
     }
 
@@ -151,21 +152,19 @@ impl<'a> App<'a> {
                 .set_title(&format!("{TITLE} - {fps:.0} fps / {tps:.0} tps"));
         }
 
-        if let Some(ui) = &mut gpu.ui {
-            ui.prepare(
-                &gpu.ctx,
-                &Status {
-                    particles: self.scene.shapes.len(),
-                    tick: self.simulation.tick(),
-                    fps: self.rates.fps,
-                    tps: self.rates.tps,
-                    zoom: self.camera.zoom,
-                    pan: self.camera.pan,
-                    paused: self.simulation.is_paused(),
-                    speed: self.simulation.speed(),
-                },
-            );
-        }
+        gpu.ui.prepare(
+            &gpu.ctx,
+            &Status {
+                particles: self.scene.shapes.len(),
+                tick: self.simulation.tick(),
+                fps: self.rates.fps,
+                tps: self.rates.tps,
+                zoom: self.camera.zoom,
+                pan: self.camera.pan,
+                paused: self.simulation.is_paused(),
+                speed: self.simulation.speed(),
+            },
+        );
 
         if let Some(frame) = gpu.ctx.acquire_frame() {
             let view = frame
@@ -181,9 +180,7 @@ impl<'a> App<'a> {
 
             gpu.renderer
                 .draw(&gpu.ctx, &mut encoder, &view, &self.camera);
-            if let Some(ui) = &gpu.ui {
-                ui.draw(&mut encoder, &view);
-            }
+            gpu.ui.draw(&mut encoder, &view);
 
             gpu.ctx.queue.submit(Some(encoder.finish()));
 
@@ -218,10 +215,13 @@ impl ApplicationHandler for App<'_> {
         let scale = window.scale_factor() as f32;
         let ctx = pollster::block_on(GpuContext::new(window, event_loop.owned_display_handle()));
         let renderer = Renderer::new(&ctx, &self.scene.shapes);
-        let ui = self
+        // Taken on the first resume; rebuilt from the config on any later one,
+        // which only happens if the window was torn down and brought back.
+        let face = self
             .font
             .take()
-            .map(|face| Ui::new(&ctx, &self.config.ui, face, scale));
+            .unwrap_or_else(|| FontFace::load(self.config.ui.font_path.as_deref()));
+        let ui = Ui::new(&ctx, &self.config.ui, face, scale, self.config_file);
 
         ctx.window.request_redraw();
         self.gpu = Some(Gpu { ctx, renderer, ui });
@@ -265,9 +265,7 @@ impl App<'_> {
             WindowEvent::Resized(new_size) => gpu.ctx.resize(new_size),
 
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                if let Some(ui) = &mut gpu.ui {
-                    ui.set_scale(&gpu.ctx, scale_factor as f32);
-                }
+                gpu.ui.set_scale(&gpu.ctx, scale_factor as f32);
             }
 
             WindowEvent::CursorMoved { position, .. } => {

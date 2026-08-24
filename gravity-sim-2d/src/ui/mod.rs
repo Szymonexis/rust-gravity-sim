@@ -27,11 +27,19 @@ pub struct Ui {
     scale: f32,
     show_stats: bool,
     show_manual: bool,
+    /// The settings file the manual points the user at.
+    config_file: Option<String>,
 }
 
 impl Ui {
-    pub fn new(ctx: &GpuContext, config: &UiConfig, face: FontFace, scale: f32) -> Self {
-        println!("Using font: {}", face.source.display());
+    pub fn new(
+        ctx: &GpuContext,
+        config: &UiConfig,
+        face: FontFace,
+        scale: f32,
+        config_file: Option<&str>,
+    ) -> Self {
+        println!("Using font: {}", face.source);
 
         let atlas = face.rasterize(config.font_size * scale);
         let renderer = UiRenderer::new(ctx, &atlas);
@@ -45,6 +53,7 @@ impl Ui {
             scale,
             show_stats: config.show_stats,
             show_manual: config.show_manual,
+            config_file: config_file.map(str::to_owned),
         }
     }
 
@@ -75,7 +84,7 @@ impl Ui {
             );
         }
 
-        overlay::playback(status, self.show_manual).layout(
+        overlay::playback(status, self.show_manual, self.config_file.as_deref()).layout(
             &mut self.quads,
             &self.atlas,
             Anchor::TopRight,
