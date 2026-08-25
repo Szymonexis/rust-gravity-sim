@@ -2,6 +2,7 @@ use std::f32::consts::PI;
 
 use crate::config::Area;
 use crate::generation::grid::SpatialGrid;
+use crate::math::Vec2;
 use crate::simulation::Particle;
 
 const CROWDED_FILL_FRACTION: f32 = 0.65;
@@ -29,7 +30,7 @@ pub fn separate(particles: &mut [Particle], area: Area, iterations: u32, padding
     let tolerance = CONTACT_TOLERANCE * widest_radius;
 
     let mut grid = SpatialGrid::new(particles, area, widest_radius, padding);
-    let mut pushes = vec![[0.0f32; 2]; particles.len()];
+    let mut pushes = vec![Vec2::ZERO; particles.len()];
     let mut contacts = vec![0u32; particles.len()];
 
     for _ in 0..iterations {
@@ -44,15 +45,8 @@ pub fn separate(particles: &mut [Particle], area: Area, iterations: u32, padding
                 continue;
             }
 
-            // Averaged over the contacts rather than summed: deep inside a
-            // clump a particle is pushed from every side at once, and obeying
-            // all of those at full strength launches it clear across the cloud.
             let scale = RELAXATION / *contacts as f32;
-            let position = particle.position();
-            let moved = [
-                position[0] + push[0] * scale,
-                position[1] + push[1] * scale,
-            ];
+            let moved = *particle.position() + *push * scale;
             particle.set_position(area.clamp_inside(moved));
         }
     }
@@ -62,10 +56,10 @@ fn accumulate_pushes(
     particles: &[Particle],
     grid: &SpatialGrid,
     padding: f32,
-    pushes: &mut [[f32; 2]],
+    pushes: &mut [Vec2],
     contacts: &mut [u32],
 ) -> f32 {
-    pushes.fill([0.0, 0.0]);
+    pushes.fill(Vec2::ZERO);
     contacts.fill(0);
     let mut deepest = 0.0f32;
 
@@ -77,11 +71,8 @@ fn accumulate_pushes(
             let other = &particles[j];
 
             let wanted = particle.radius() + other.radius() + padding;
-            let delta = [
-                other.position()[0] - particle.position()[0],
-                other.position()[1] - particle.position()[1],
-            ];
-            let distance_sq = delta[0] * delta[0] + delta[1] * delta[1];
+            let delta = *other.position() - *particle.position();
+            let distance_sq = delta.length_squared();
             if distance_sq >= wanted * wanted {
                 continue;
             }
@@ -91,13 +82,10 @@ fn accumulate_pushes(
 
             let (axis, gap) = if distance_sq > COINCIDENT_EPSILON {
                 let distance = distance_sq.sqrt();
-                (
-                    [delta[0] / distance, delta[1] / distance],
-                    wanted - distance,
-                )
+                (delta / distance, wanted - distance)
             } else {
                 let theta = i as f32 * GOLDEN_ANGLE;
-                ([theta.cos(), theta.sin()], wanted)
+                (Vec2::new(theta.cos(), theta.sin()), wanted)
             };
             deepest = deepest.max(gap);
 
@@ -108,10 +96,8 @@ fn accumulate_pushes(
                 (0.5, 0.5)
             };
 
-            pushes[i][0] -= axis[0] * gap * share;
-            pushes[i][1] -= axis[1] * gap * share;
-            pushes[j][0] += axis[0] * gap * other_share;
-            pushes[j][1] += axis[1] * gap * other_share;
+            pushes[i] -= axis * gap * share;
+            pushes[j] += axis * gap * other_share;
         }
     }
 

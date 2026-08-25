@@ -17,7 +17,15 @@
 	},
 	"simulation": {
 		"tickRate": 60.0,
-		"maxCatchUpTicks": 5
+		"maxCatchUpTicks": 5,
+		"gravitationalConstant": 4.0,
+		"method": "Naive",
+		"collisions": "Merge"
+	},
+	"colors": {
+		"white": 10.0,
+		"yellow": 200.0,
+		"red": 1000.0
 	},
 	"ui": {
 		"fontPath": null,
@@ -25,33 +33,35 @@
 		"showStats": true,
 		"showManual": true
 	},
-	"generation": {
-		"amount": 100,
-		"area": {
-			"Circle": {
-				"radius": 100.0
-			}
-		},
-		"position": {
-			"Gaussian": {
-				"spread": 1.9
-			}
-		},
-		"velocity": {
-			"Orbital": {
-				"angular_speed": 0.5
-			}
-		},
-		"mass": {
-			"Random": {
-				"min": 1.0,
-				"max": 2.5
-			}
-		},
-		"overlap": {
-			"Separate": {
-				"iterations": 32,
-				"padding": 0.1
+	"particles": {
+		"Generation": {
+			"amount": 100,
+			"area": {
+				"Circle": {
+					"radius": 100.0
+				}
+			},
+			"position": {
+				"Gaussian": {
+					"spread": 1.9
+				}
+			},
+			"velocity": {
+				"Orbital": {
+					"angular_speed": 0.5
+				}
+			},
+			"mass": {
+				"Random": {
+					"min": 1.0,
+					"max": 2.5
+				}
+			},
+			"overlap": {
+				"Separate": {
+					"iterations": 32,
+					"padding": 0.1
+				}
 			}
 		}
 	}

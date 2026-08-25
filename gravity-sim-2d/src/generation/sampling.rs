@@ -3,8 +3,9 @@ use std::f32::consts::{PI, TAU};
 use rand::{Rng, RngExt};
 
 use crate::config::{MassStrategy, PositionStrategy, VelocityStrategy};
+use crate::math::Vec2;
 
-pub fn positions(strategy: PositionStrategy, amount: usize, rng: &mut impl Rng) -> Vec<[f32; 2]> {
+pub fn positions(strategy: PositionStrategy, amount: usize, rng: &mut impl Rng) -> Vec<Vec2> {
     match strategy {
         PositionStrategy::Uniform => (0..amount).map(|_| uniform_unit_disc(rng)).collect(),
 
@@ -19,7 +20,7 @@ pub fn positions(strategy: PositionStrategy, amount: usize, rng: &mut impl Rng) 
                     let u: f32 = rng.random();
                     let r = (inner * inner + u * (1.0 - inner * inner)).sqrt();
                     let theta = rng.random_range(0.0..TAU);
-                    [r * theta.cos(), r * theta.sin()]
+                    Vec2::new(r * theta.cos(), r * theta.sin())
                 })
                 .collect()
         }
@@ -31,51 +32,51 @@ pub fn positions(strategy: PositionStrategy, amount: usize, rng: &mut impl Rng) 
                 .map(|i| {
                     let r = ((i as f32 + 0.5) / amount as f32).sqrt();
                     let theta = i as f32 * golden_angle;
-                    [r * theta.cos(), r * theta.sin()]
+                    Vec2::new(r * theta.cos(), r * theta.sin())
                 })
                 .collect()
         }
 
         PositionStrategy::Clusters { count, spread } => {
             let count = count.max(1);
-            let centers: Vec<[f32; 2]> = (0..count).map(|_| uniform_unit_disc(rng)).collect();
+            let centers: Vec<Vec2> = (0..count).map(|_| uniform_unit_disc(rng)).collect();
 
             (0..amount)
                 .map(|i| {
-                    let [center_0, center_1] = centers[i % count];
-                    let [offset_0, offset_1] =
-                        [standard_normal(rng) * spread, standard_normal(rng) * spread];
+                    let center = centers[i % count];
+                    let offset =
+                        Vec2::new(standard_normal(rng) * spread, standard_normal(rng) * spread);
 
-                    clamp_to_unit_disc([center_0 + offset_0, center_1 + offset_1])
+                    clamp_to_unit_disc(center + offset)
                 })
                 .collect()
         }
     }
 }
 
-pub fn velocity(strategy: VelocityStrategy, position: [f32; 2], rng: &mut impl Rng) -> [f32; 2] {
+pub fn velocity(strategy: VelocityStrategy, position: Vec2, rng: &mut impl Rng) -> Vec2 {
     match strategy {
-        VelocityStrategy::Stationary => [0.0, 0.0],
+        VelocityStrategy::Stationary => Vec2::ZERO,
 
         VelocityStrategy::CommonVector { velocity } => velocity,
 
         VelocityStrategy::Random { max_speed } => {
             let theta = rng.random_range(0.0..TAU);
             let speed = rng.random_range(0.0..=max_speed);
-            [speed * theta.cos(), speed * theta.sin()]
+            Vec2::new(speed * theta.cos(), speed * theta.sin())
         }
 
         VelocityStrategy::Orbital { angular_speed } => {
-            [-angular_speed * position[1], angular_speed * position[0]]
+            Vec2::new(-angular_speed * position.y, angular_speed * position.x)
         }
 
         VelocityStrategy::Radial { speed } => {
-            let len = (position[0] * position[0] + position[1] * position[1]).sqrt();
+            let len = position.length();
             if len < f32::EPSILON {
                 let theta = rng.random_range(0.0..TAU);
-                [speed * theta.cos(), speed * theta.sin()]
+                Vec2::new(speed * theta.cos(), speed * theta.sin())
             } else {
-                [speed * position[0] / len, speed * position[1] / len]
+                position * (speed / len)
             }
         }
     }
@@ -89,18 +90,18 @@ pub fn mass(strategy: MassStrategy, rng: &mut impl Rng) -> f32 {
     }
 }
 
-fn uniform_unit_disc(rng: &mut impl Rng) -> [f32; 2] {
+fn uniform_unit_disc(rng: &mut impl Rng) -> Vec2 {
     let theta = rng.random_range(0.0..TAU);
     let r = rng.random::<f32>().sqrt();
-    [r * theta.cos(), r * theta.sin()]
+    Vec2::new(r * theta.cos(), r * theta.sin())
 }
 
-fn gaussian_unit_disc(std_dev: f32, rng: &mut impl Rng) -> [f32; 2] {
+fn gaussian_unit_disc(std_dev: f32, rng: &mut impl Rng) -> Vec2 {
     let sigma = std_dev.max(1e-4);
 
     for _ in 0..64 {
-        let p = [standard_normal(rng) * sigma, standard_normal(rng) * sigma];
-        if p[0] * p[0] + p[1] * p[1] <= 1.0 {
+        let p = Vec2::new(standard_normal(rng) * sigma, standard_normal(rng) * sigma);
+        if p.length_squared() <= 1.0 {
             return p;
         }
     }
@@ -114,12 +115,7 @@ fn standard_normal(rng: &mut impl Rng) -> f32 {
     (-2.0 * u1.ln()).sqrt() * (TAU * u2).cos()
 }
 
-fn clamp_to_unit_disc(p: [f32; 2]) -> [f32; 2] {
-    let len_sq = p[0] * p[0] + p[1] * p[1];
-    if len_sq <= 1.0 {
-        p
-    } else {
-        let len = len_sq.sqrt();
-        [p[0] / len, p[1] / len]
-    }
+fn clamp_to_unit_disc(p: Vec2) -> Vec2 {
+    let len_sq = p.length_squared();
+    if len_sq <= 1.0 { p } else { p / len_sq.sqrt() }
 }

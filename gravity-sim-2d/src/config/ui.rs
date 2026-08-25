@@ -1,14 +1,28 @@
+use schemars::JsonSchema;
 use serde_json::{Map, Value};
 
 use crate::config::partial::{FromJsonObject, leaf, warn_unknown_keys};
 
-#[derive(Debug, Clone)]
+/// The on-screen overlay. Drawn as its own pass on top of the scene, in
+/// physical pixels, so none of it moves when you pan or zoom.
+#[derive(Debug, Clone, JsonSchema)]
+#[schemars(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct UiConfig {
-    /// Absolute path to a `.ttf`/`.otf` file. `None` - or anything that fails
-    /// to load - falls through to the JetBrains Mono that ships with the app.
+    /// Absolute path to a .ttf or .otf file. Forward slashes work on Windows
+    /// too, and save you escaping every backslash. Null - or a path that won't
+    /// load - falls back to JetBrains Mono, which ships with the app.
     pub font_path: Option<String>,
+    /// Text height in logical pixels. Multiplied by the display scale factor
+    /// before the glyphs are rasterised, so it stays the same physical size on
+    /// a hi-dpi screen.
+    #[schemars(range(min = 4.0))]
     pub font_size: f32,
+    /// Whether the top-left panel - particle count, tick, fps, tps, zoom, pan -
+    /// is drawn.
     pub show_stats: bool,
+    /// Whether the controls list - drag, wheel, space, arrows, esc - is drawn
+    /// under the playback state in the top-right panel. The playback state
+    /// itself is always shown.
     pub show_manual: bool,
 }
 

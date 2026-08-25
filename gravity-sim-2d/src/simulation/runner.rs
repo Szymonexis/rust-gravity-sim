@@ -4,12 +4,11 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use crate::config::SimulationConfig;
+use crate::config::{SimulationConfig, SimulationMethod};
 use crate::simulation::{Particle, Speed, World};
 
 const SPIN_MARGIN: Duration = Duration::from_micros(500);
 const MAX_SLEEP: Duration = Duration::from_millis(50);
-/// How often a stopped thread looks up to see whether it has work again.
 const IDLE_POLL: Duration = Duration::from_millis(2);
 
 struct Slot {
@@ -18,17 +17,11 @@ struct Slot {
     fresh: bool,
 }
 
-/// Everything the two threads touch. The controls are atomics rather than a
-/// second mutex so the window thread can flip a switch without ever waiting on
-/// a tick that is halfway through.
 struct Shared {
     slot: Mutex<Slot>,
     running: AtomicBool,
     paused: AtomicBool,
-    /// [`Speed::value`] as raw f32 bits.
     speed: AtomicU32,
-    /// Single ticks queued up by the window thread while paused. Signed, and
-    /// drained rather than read, so a burst of key presses can't be lost.
     steps: AtomicI32,
 }
 
@@ -74,8 +67,6 @@ impl SimulationHandle {
         }
     }
 
-    /// Drop-oldest: a display slower than the tick rate skips states rather
-    /// than queueing them.
     pub fn try_recv(&mut self) -> Option<&[Particle]> {
         {
             let mut slot = self
@@ -122,8 +113,6 @@ impl SimulationHandle {
         self.publish_speed();
     }
 
-    /// Queue `ticks` single steps. Negative walks backwards. Only the paused
-    /// thread drains these; while running they would fight the clock.
     pub fn step(&self, ticks: i32) {
         self.shared.steps.fetch_add(ticks, Ordering::Relaxed);
     }
@@ -148,14 +137,14 @@ fn run(mut world: World, config: SimulationConfig, shared: &Shared) {
     let base_period = config.tick_period();
     let delta = base_period.as_secs_f32();
     let max_catch_up = config.max_catch_up_ticks.max(1);
+    let method = config.method;
 
     let mut scratch = Vec::with_capacity(world.particles().len());
     let mut next_tick = Instant::now();
 
     while shared.running.load(Ordering::Relaxed) {
         if shared.paused.load(Ordering::Relaxed) {
-            step_manually(&mut world, shared, &mut scratch, delta);
-            // Time spent paused is not a backlog to catch up on.
+            step_manually(&mut world, shared, &mut scratch, delta, method);
             next_tick = Instant::now() + base_period;
             thread::sleep(IDLE_POLL);
             continue;
@@ -168,18 +157,12 @@ fn run(mut world: World, config: SimulationConfig, shared: &Shared) {
             continue;
         }
 
-        // Speed rescales the wall-clock gap between ticks, not the dt each tick
-        // integrates with, so the physics resolution stays exactly where
-        // `tickRate` put it no matter how fast you wind the world.
         let period = base_period.div_f32(speed.abs());
         let signed_delta = delta * speed.signum();
 
-        // Deadlines advance by a fixed period rather than from "now", so a tick
-        // that runs long borrows from the next one instead of stretching the
-        // clock, and the average rate stays exactly as configured.
         let mut ticks = 0;
         while ticks < max_catch_up && Instant::now() >= next_tick {
-            world.tick(signed_delta);
+            world.on_tick(signed_delta, method);
             next_tick += period;
             ticks += 1;
         }
@@ -189,9 +172,6 @@ fn run(mut world: World, config: SimulationConfig, shared: &Shared) {
         }
 
         if Instant::now() >= next_tick {
-            // Still behind after the whole catch-up budget: this machine can't
-            // hold the configured rate, so drop the backlog and run slower than
-            // real time rather than chase a debt that only grows.
             next_tick = Instant::now() + period;
         }
 
@@ -199,7 +179,13 @@ fn run(mut world: World, config: SimulationConfig, shared: &Shared) {
     }
 }
 
-fn step_manually(world: &mut World, shared: &Shared, scratch: &mut Vec<Particle>, delta: f32) {
+fn step_manually(
+    world: &mut World,
+    shared: &Shared,
+    scratch: &mut Vec<Particle>,
+    delta: f32,
+    method: SimulationMethod,
+) {
     let steps = shared.steps.swap(0, Ordering::Relaxed);
     if steps == 0 {
         return;
@@ -207,7 +193,7 @@ fn step_manually(world: &mut World, shared: &Shared, scratch: &mut Vec<Particle>
 
     let direction = steps.signum() as f32;
     for _ in 0..steps.unsigned_abs() {
-        world.tick(delta * direction);
+        world.on_tick(delta * direction, method);
     }
 
     publish(shared, scratch, world);
@@ -223,8 +209,6 @@ fn publish(shared: &Shared, scratch: &mut Vec<Particle>, world: &World) {
     slot.fresh = true;
 }
 
-/// `sleep` only promises *at least* the requested time, so the last stretch
-/// before a deadline is spun out by hand.
 fn sleep_until(deadline: Instant, shared: &Shared) {
     loop {
         let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
@@ -236,7 +220,6 @@ fn sleep_until(deadline: Instant, shared: &Shared) {
             None => std::hint::spin_loop(),
         }
 
-        // A pause must not have to wait out a whole period to take effect.
         if !shared.running.load(Ordering::Relaxed) || shared.paused.load(Ordering::Relaxed) {
             return;
         }

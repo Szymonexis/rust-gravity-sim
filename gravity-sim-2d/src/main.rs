@@ -3,6 +3,7 @@ mod color;
 mod config;
 mod generation;
 mod gpu;
+mod math;
 mod simulation;
 mod ui;
 mod view;

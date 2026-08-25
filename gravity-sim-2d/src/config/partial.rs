@@ -48,7 +48,7 @@ pub fn warn_unknown_keys(obj: &Map<String, Value>, known: &[&str], path: &str) {
     }
 }
 
-fn join(path: &str, key: &str) -> String {
+pub fn join(path: &str, key: &str) -> String {
     if path.is_empty() {
         key.to_owned()
     } else {

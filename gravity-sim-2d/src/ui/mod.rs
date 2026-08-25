@@ -14,20 +14,15 @@ use crate::ui::panel::Anchor;
 use crate::ui::quad::Quad;
 use crate::ui::renderer::UiRenderer;
 
-/// The overlay: a font rasterised into one atlas, panels laid out into quads,
-/// and a single instanced draw call on top of the scene.
 pub struct Ui {
     face: FontFace,
     atlas: Atlas,
     renderer: UiRenderer,
-    /// Rebuilt from scratch every frame. The buffer is kept so that rebuild
-    /// costs nothing but a memcpy.
     quads: Vec<Quad>,
     font_size: f32,
     scale: f32,
     show_stats: bool,
     show_manual: bool,
-    /// The settings file the manual points the user at.
     config_file: Option<String>,
 }
 
@@ -57,8 +52,6 @@ impl Ui {
         }
     }
 
-    /// The atlas is rasterised in physical pixels, so a window dragged onto a
-    /// display with a different scale factor needs it built again.
     pub fn set_scale(&mut self, ctx: &GpuContext, scale: f32) {
         if scale == self.scale {
             return;

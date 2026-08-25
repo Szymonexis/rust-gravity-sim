@@ -1,11 +1,12 @@
 use super::{ColorRGBA, WHITE, mix};
 
 pub struct ColorRamp {
-    stops: &'static [(f32, ColorRGBA)],
+    stops: Vec<(f32, ColorRGBA)>,
 }
 
 impl ColorRamp {
-    pub const fn new(stops: &'static [(f32, ColorRGBA)]) -> Self {
+    pub fn new(mut stops: Vec<(f32, ColorRGBA)>) -> Self {
+        stops.sort_by(|(left, _), (right, _)| left.total_cmp(right));
         Self { stops }
     }
 

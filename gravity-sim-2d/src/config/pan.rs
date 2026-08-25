@@ -1,9 +1,13 @@
+use schemars::JsonSchema;
 use serde_json::{Map, Value};
 
 use crate::config::partial::{FromJsonObject, leaf, warn_unknown_keys};
 
-#[derive(Debug)]
+/// Click-and-drag panning.
+#[derive(Debug, JsonSchema)]
+#[schemars(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct PanConfig {
+    /// Whether holding the left mouse button and dragging pans the camera.
     pub enable: bool,
 }
 

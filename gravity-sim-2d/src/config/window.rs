@@ -1,11 +1,17 @@
+use schemars::JsonSchema;
 use serde_json::{Map, Value};
 
 use crate::config::partial::{FromJsonObject, leaf, warn_unknown_keys};
 
-#[derive(Debug)]
+/// Size and behaviour of the OS window.
+#[derive(Debug, JsonSchema)]
+#[schemars(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct WindowConfig {
+    /// Window height in logical pixels.
     pub height: f32,
+    /// Window width in logical pixels.
     pub width: f32,
+    /// Whether the window can be resized by dragging its edges.
     pub resizable: bool,
 }
 

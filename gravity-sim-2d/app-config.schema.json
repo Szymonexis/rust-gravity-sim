@@ -1,470 +1,788 @@
 {
 	"$schema": "http://json-schema.org/draft-07/schema#",
-	"title": "Gravity Sim 2D config",
-	"description": "Every key is optional. Anything missing or invalid falls back to its own default, so one bad entry never costs you the rest of the file.",
-	"type": "object",
 	"additionalProperties": false,
-	"properties": {
-		"$schema": {
-			"type": "string",
-			"description": "Path to this schema. Ignored by the loader."
-		},
-		"window": { "$ref": "#/definitions/window" },
-		"zoom": { "$ref": "#/definitions/zoom" },
-		"pan": { "$ref": "#/definitions/pan" },
-		"simulation": { "$ref": "#/definitions/simulation" },
-		"generation": { "$ref": "#/definitions/generation" },
-		"ui": { "$ref": "#/definitions/ui" }
-	},
 	"definitions": {
-		"window": {
-			"type": "object",
-			"description": "Size and behaviour of the OS window.",
-			"additionalProperties": false,
-			"properties": {
-				"height": {
-					"type": "number",
-					"default": 720,
-					"description": "Window height in logical pixels."
+		"Area": {
+			"oneOf": [
+				{
+					"additionalProperties": false,
+					"description": "A disc of the given radius.",
+					"properties": {
+						"Circle": {
+							"additionalProperties": false,
+							"properties": {
+								"radius": {
+									"description": "Radius in world units.",
+									"format": "float",
+									"type": "number"
+								}
+							},
+							"required": [
+								"radius"
+							],
+							"type": "object"
+						}
+					},
+					"required": [
+						"Circle"
+					],
+					"title": "Circle",
+					"type": "object"
 				},
-				"width": {
-					"type": "number",
-					"default": 1280,
-					"description": "Window width in logical pixels."
-				},
-				"resizable": {
-					"type": "boolean",
-					"default": true,
-					"description": "Whether the window can be resized by dragging its edges."
+				{
+					"additionalProperties": false,
+					"description": "An ellipse with independent horizontal and vertical semi-axes.",
+					"properties": {
+						"Ellipse": {
+							"additionalProperties": false,
+							"properties": {
+								"semi_x": {
+									"description": "Horizontal semi-axis in world units.",
+									"format": "float",
+									"type": "number"
+								},
+								"semi_y": {
+									"description": "Vertical semi-axis in world units.",
+									"format": "float",
+									"type": "number"
+								}
+							},
+							"required": [
+								"semi_x",
+								"semi_y"
+							],
+							"type": "object"
+						}
+					},
+					"required": [
+						"Ellipse"
+					],
+					"title": "Ellipse",
+					"type": "object"
 				}
-			}
+			]
 		},
-		"zoom": {
-			"type": "object",
-			"description": "Scroll-wheel zoom.",
+		"CollisionStrategy": {
+			"description": "What becomes of particles that end a tick intersecting each other.",
+			"oneOf": [
+				{
+					"const": "Ignore",
+					"description": "Particles pass straight through one another. Only gravity ever moves them.",
+					"type": "string"
+				},
+				{
+					"const": "Merge",
+					"description": "Every touching group - a chain of overlaps counts as one group, however long - collapses into a single particle at its centre of mass, carrying the mass and the momentum of everything that went into it. Mass is area, so the survivor is drawn exactly as large as the discs it swallowed put together. Merging is one-way: reversing the speed dial replays the motion, not the merges.",
+					"type": "string"
+				}
+			]
+		},
+		"ColorsConfig": {
 			"additionalProperties": false,
+			"description": "Mass thresholds for the colour a particle is drawn in. A particle lighter than the lowest threshold takes that stop's colour, one heavier than the highest takes that one, and anything in between is blended across the two it falls between. The three are sorted by mass, so the order you write them in doesn't matter.",
 			"properties": {
-				"enable": {
-					"type": "boolean",
-					"default": true,
-					"description": "Whether the scroll wheel zooms at all. When false the other keys here are inert."
+				"red": {
+					"default": 1000.0,
+					"description": "Mass drawn red.",
+					"exclusiveMinimum": 0.0,
+					"format": "float",
+					"type": "number"
 				},
-				"min": {
-					"type": "number",
-					"default": 0.1,
-					"description": "Lower clamp on the zoom factor."
-				},
-				"max": {
-					"type": "number",
-					"default": 10000.0,
-					"description": "Upper clamp on the zoom factor."
-				},
-				"step": {
-					"type": "number",
-					"default": 1.1,
-					"description": "Multiplier applied per scroll line: new zoom = zoom * step^lines. At or below 1 this inverts or freezes zooming."
-				},
-				"initial": {
-					"type": "number",
+				"white": {
 					"default": 10.0,
-					"description": "Zoom factor the camera starts at."
-				}
-			}
-		},
-		"pan": {
-			"type": "object",
-			"description": "Click-and-drag panning.",
-			"additionalProperties": false,
-			"properties": {
-				"enable": {
-					"type": "boolean",
-					"default": true,
-					"description": "Whether holding the left mouse button and dragging pans the camera."
-				}
-			}
-		},
-		"simulation": {
-			"type": "object",
-			"description": "Pacing of the simulation thread. It runs on its own clock, so none of this is tied to the display refresh rate.",
-			"additionalProperties": false,
-			"properties": {
-				"tickRate": {
-					"type": "number",
-					"exclusiveMinimum": 0,
-					"default": 60.0,
-					"description": "Ticks per second. Also fixes the dt every tick integrates with, so changing it changes the physics resolution, not just the pace."
+					"description": "Mass drawn white.",
+					"exclusiveMinimum": 0.0,
+					"format": "float",
+					"type": "number"
 				},
-				"maxCatchUpTicks": {
-					"type": "integer",
-					"minimum": 1,
-					"default": 5,
-					"description": "Most ticks run back to back when the thread has fallen behind. Past this the backlog is dropped and the simulation runs slower than real time instead of spiralling."
+				"yellow": {
+					"default": 200.0,
+					"description": "Mass drawn yellow.",
+					"exclusiveMinimum": 0.0,
+					"format": "float",
+					"type": "number"
 				}
-			}
+			},
+			"type": "object"
 		},
-		"ui": {
-			"type": "object",
-			"description": "The on-screen overlay. Drawn as its own pass on top of the scene, in physical pixels, so none of it moves when you pan or zoom.",
+		"GenerationConfig": {
 			"additionalProperties": false,
-			"properties": {
-				"fontPath": {
-					"type": ["string", "null"],
-					"default": null,
-					"description": "Absolute path to a .ttf or .otf file. Forward slashes work on Windows too, and save you escaping every backslash. Null - or a path that won't load - falls back to JetBrains Mono, which ships with the app."
-				},
-				"fontSize": {
-					"type": "number",
-					"minimum": 4,
-					"default": 14.0,
-					"description": "Text height in logical pixels. Multiplied by the display scale factor before the glyphs are rasterised, so it stays the same physical size on a hi-dpi screen."
-				},
-				"showStats": {
-					"type": "boolean",
-					"default": true,
-					"description": "Whether the top-left panel - particle count, tick, fps, tps, zoom, pan - is drawn."
-				},
-				"showManual": {
-					"type": "boolean",
-					"default": true,
-					"description": "Whether the controls list - drag, wheel, space, arrows, esc - is drawn under the playback state in the top-right panel. The playback state itself is always shown."
-				}
-			}
-		},
-		"generation": {
-			"type": "object",
-			"description": "How the starting set of particles is built. Applied once at startup.",
-			"additionalProperties": false,
+			"description": "How a generated cloud is built. Positions, masses and velocities are all sampled from the strategies below.",
 			"properties": {
 				"amount": {
-					"type": "integer",
-					"minimum": 0,
 					"default": 100,
-					"description": "Number of particles to generate."
+					"description": "Number of particles to generate.",
+					"format": "uint",
+					"minimum": 0,
+					"type": "integer"
 				},
 				"area": {
-					"allOf": [{ "$ref": "#/definitions/area" }],
-					"default": { "Circle": { "radius": 1000.0 } },
+					"allOf": [
+						{
+							"$ref": "#/definitions/Area"
+						}
+					],
+					"default": {
+						"Circle": {
+							"radius": 1000.0
+						}
+					},
 					"description": "Region the particles are spawned into. Positions are sampled on a unit disc, then scaled by the semi-axes of this area."
 				},
+				"mass": {
+					"allOf": [
+						{
+							"$ref": "#/definitions/MassStrategy"
+						}
+					],
+					"default": {
+						"Random": {
+							"max": 2000.0,
+							"min": 1.0
+						}
+					},
+					"description": "How the mass of each particle is chosen. Mass is treated as area, so the drawn radius is sqrt(mass) / 2, and it drives render colour through the mass-colour ramp."
+				},
+				"overlap": {
+					"allOf": [
+						{
+							"$ref": "#/definitions/OverlapStrategy"
+						}
+					],
+					"default": {
+						"Separate": {
+							"iterations": 32,
+							"padding": 0.0
+						}
+					},
+					"description": "What to do about particles that were sampled on top of each other."
+				},
 				"position": {
-					"allOf": [{ "$ref": "#/definitions/positionStrategy" }],
+					"allOf": [
+						{
+							"$ref": "#/definitions/PositionStrategy"
+						}
+					],
 					"default": "Uniform",
 					"description": "How positions are distributed across the unit disc before scaling."
 				},
 				"velocity": {
-					"allOf": [{ "$ref": "#/definitions/velocityStrategy" }],
-					"default": { "Random": { "max_speed": 10.0 } },
+					"allOf": [
+						{
+							"$ref": "#/definitions/VelocityStrategy"
+						}
+					],
+					"default": {
+						"Random": {
+							"max_speed": 10.0
+						}
+					},
 					"description": "Initial velocity given to each particle."
-				},
-				"mass": {
-					"allOf": [{ "$ref": "#/definitions/massStrategy" }],
-					"default": { "Random": { "min": 1.0, "max": 2000.0 } },
-					"description": "How the mass of each particle is chosen. Mass is treated as area, so the drawn radius is sqrt(mass) / 2, and it drives render colour through the mass-colour ramp."
-				},
-				"overlap": {
-					"allOf": [{ "$ref": "#/definitions/overlapStrategy" }],
-					"default": { "Separate": { "iterations": 32, "padding": 0.0 } },
-					"description": "What to do about particles that were sampled on top of each other."
 				}
-			}
+			},
+			"type": "object"
 		},
-		"overlapStrategy": {
+		"MassStrategy": {
+			"oneOf": [
+				{
+					"additionalProperties": false,
+					"description": "Every particle gets the same mass.",
+					"properties": {
+						"Constant": {
+							"additionalProperties": false,
+							"properties": {
+								"value": {
+									"description": "Mass for every particle. Negative values are clamped to 0.",
+									"format": "float",
+									"type": "number"
+								}
+							},
+							"required": [
+								"value"
+							],
+							"type": "object"
+						}
+					},
+					"required": [
+						"Constant"
+					],
+					"title": "Constant",
+					"type": "object"
+				},
+				{
+					"additionalProperties": false,
+					"description": "Mass drawn uniformly from a range.",
+					"properties": {
+						"Random": {
+							"additionalProperties": false,
+							"properties": {
+								"max": {
+									"description": "Exclusive upper bound. Must be above min.",
+									"format": "float",
+									"type": "number"
+								},
+								"min": {
+									"description": "Inclusive lower bound.",
+									"format": "float",
+									"type": "number"
+								}
+							},
+							"required": [
+								"min",
+								"max"
+							],
+							"type": "object"
+						}
+					},
+					"required": [
+						"Random"
+					],
+					"title": "Random",
+					"type": "object"
+				}
+			]
+		},
+		"OverlapStrategy": {
 			"oneOf": [
 				{
 					"const": "Allow",
-					"description": "Particles land wherever the position strategy put them, intersections included."
+					"description": "Particles land wherever the position strategy put them, intersections included.",
+					"type": "string"
 				},
 				{
-					"type": "object",
-					"title": "Separate",
-					"description": "Overlapping particles are pushed apart afterwards. Positions are nudged rather than resampled, so the shape the position strategy produced survives. Heavier particles give way less than lighter ones.",
 					"additionalProperties": false,
-					"required": ["Separate"],
+					"description": "Overlapping particles are pushed apart afterwards. Positions are nudged rather than resampled, so the shape the position strategy produced survives. Heavier particles give way less than lighter ones.",
 					"properties": {
 						"Separate": {
-							"type": "object",
 							"additionalProperties": false,
-							"required": ["iterations", "padding"],
 							"properties": {
 								"iterations": {
-									"type": "integer",
+									"description": "Most relaxation passes to run. Stops early once nothing intersects, so raising this only costs anything on crowded setups.",
+									"format": "uint32",
 									"minimum": 0,
-									"description": "Most relaxation passes to run. Stops early once nothing intersects, so raising this only costs anything on crowded setups."
+									"type": "integer"
 								},
 								"padding": {
-									"type": "number",
-									"minimum": 0,
-									"description": "Extra gap in world units left between two touching particles."
+									"description": "Extra gap in world units left between two touching particles.",
+									"format": "float",
+									"type": "number"
 								}
-							}
+							},
+							"required": [
+								"iterations",
+								"padding"
+							],
+							"type": "object"
 						}
-					}
+					},
+					"required": [
+						"Separate"
+					],
+					"title": "Separate",
+					"type": "object"
 				}
 			]
 		},
-		"area": {
+		"PanConfig": {
+			"additionalProperties": false,
+			"description": "Click-and-drag panning.",
+			"properties": {
+				"enable": {
+					"default": true,
+					"description": "Whether holding the left mouse button and dragging pans the camera.",
+					"type": "boolean"
+				}
+			},
+			"type": "object"
+		},
+		"Particle": {
+			"additionalProperties": false,
+			"description": "One particle, placed by hand. Every field is optional and falls back to its default, so a particle at rest is just a position and a mass.",
+			"properties": {
+				"mass": {
+					"default": 1.0,
+					"description": "Mass in world units. Negative values are clamped to 0. Mass is treated as area, so the drawn radius is sqrt(mass) / 2, and it drives render colour through the mass-colour ramp.",
+					"format": "float",
+					"type": "number"
+				},
+				"position": {
+					"allOf": [
+						{
+							"$ref": "#/definitions/Vec2"
+						}
+					],
+					"default": {
+						"x": 0.0,
+						"y": 0.0
+					},
+					"description": "Position in world units."
+				},
+				"velocity": {
+					"allOf": [
+						{
+							"$ref": "#/definitions/Vec2"
+						}
+					],
+					"default": {
+						"x": 0.0,
+						"y": 0.0
+					},
+					"description": "Velocity in world units per unit time."
+				}
+			},
+			"type": "object"
+		},
+		"ParticlesConfig": {
+			"description": "The particles the world starts with. Either write them out yourself under `Set`, or describe a cloud under `Generation` and let the app sample one. Applied once at startup.",
 			"oneOf": [
 				{
-					"type": "object",
-					"title": "Circle",
-					"description": "A disc of the given radius.",
 					"additionalProperties": false,
-					"required": ["Circle"],
+					"description": "An explicit list of particles, taken exactly as written.",
 					"properties": {
-						"Circle": {
-							"type": "object",
-							"additionalProperties": false,
-							"required": ["radius"],
-							"properties": {
-								"radius": {
-									"type": "number",
-									"description": "Radius in world units."
-								}
-							}
+						"Set": {
+							"items": {
+								"$ref": "#/definitions/Particle"
+							},
+							"type": "array"
 						}
-					}
+					},
+					"required": [
+						"Set"
+					],
+					"title": "Set",
+					"type": "object"
 				},
 				{
-					"type": "object",
-					"title": "Ellipse",
-					"description": "An ellipse with independent horizontal and vertical semi-axes.",
 					"additionalProperties": false,
-					"required": ["Ellipse"],
+					"description": "A recipe the generator follows to sample a cloud at startup.",
 					"properties": {
-						"Ellipse": {
-							"type": "object",
-							"additionalProperties": false,
-							"required": ["semi_x", "semi_y"],
-							"properties": {
-								"semi_x": {
-									"type": "number",
-									"description": "Horizontal semi-axis in world units."
-								},
-								"semi_y": {
-									"type": "number",
-									"description": "Vertical semi-axis in world units."
-								}
-							}
+						"Generation": {
+							"$ref": "#/definitions/GenerationConfig"
 						}
-					}
+					},
+					"required": [
+						"Generation"
+					],
+					"title": "Generation",
+					"type": "object"
 				}
 			]
 		},
-		"positionStrategy": {
+		"PositionStrategy": {
 			"oneOf": [
 				{
 					"const": "Uniform",
-					"description": "Even coverage per unit of area across the whole disc."
+					"description": "Even coverage per unit of area across the whole disc.",
+					"type": "string"
+				},
+				{
+					"additionalProperties": false,
+					"description": "Normally distributed around the centre, resampled until inside the disc.",
+					"properties": {
+						"Gaussian": {
+							"additionalProperties": false,
+							"properties": {
+								"spread": {
+									"description": "Spread as a fraction of the disc radius. Raised to 1e-4 if smaller.",
+									"format": "float",
+									"type": "number"
+								}
+							},
+							"required": [
+								"spread"
+							],
+							"type": "object"
+						}
+					},
+					"required": [
+						"Gaussian"
+					],
+					"title": "Gaussian",
+					"type": "object"
+				},
+				{
+					"additionalProperties": false,
+					"description": "Uniform within an annulus, leaving a hole in the middle.",
+					"properties": {
+						"Ring": {
+							"additionalProperties": false,
+							"properties": {
+								"inner_fraction": {
+									"description": "Inner hole radius as a fraction of the outer radius. Clamped to 0.0 - 0.999.",
+									"format": "float",
+									"type": "number"
+								}
+							},
+							"required": [
+								"inner_fraction"
+							],
+							"type": "object"
+						}
+					},
+					"required": [
+						"Ring"
+					],
+					"title": "Ring",
+					"type": "object"
 				},
 				{
 					"const": "Sunflower",
-					"description": "Deterministic golden-angle spiral. Evenly spaced with no clumping."
+					"description": "Deterministic golden-angle spiral. Evenly spaced with no clumping.",
+					"type": "string"
 				},
 				{
-					"type": "object",
-					"title": "Gaussian",
-					"description": "Normally distributed around the centre, resampled until inside the disc.",
 					"additionalProperties": false,
-					"required": ["Gaussian"],
-					"properties": {
-						"Gaussian": {
-							"type": "object",
-							"additionalProperties": false,
-							"required": ["spread"],
-							"properties": {
-								"spread": {
-									"type": "number",
-									"description": "Spread as a fraction of the disc radius. Raised to 1e-4 if smaller."
-								}
-							}
-						}
-					}
-				},
-				{
-					"type": "object",
-					"title": "Ring",
-					"description": "Uniform within an annulus, leaving a hole in the middle.",
-					"additionalProperties": false,
-					"required": ["Ring"],
-					"properties": {
-						"Ring": {
-							"type": "object",
-							"additionalProperties": false,
-							"required": ["inner_fraction"],
-							"properties": {
-								"inner_fraction": {
-									"type": "number",
-									"description": "Inner hole radius as a fraction of the outer radius. Clamped to 0.0 - 0.999."
-								}
-							}
-						}
-					}
-				},
-				{
-					"type": "object",
-					"title": "Clusters",
 					"description": "Several gaussian blobs at random centres, clamped back inside the disc.",
-					"additionalProperties": false,
-					"required": ["Clusters"],
 					"properties": {
 						"Clusters": {
-							"type": "object",
 							"additionalProperties": false,
-							"required": ["count", "spread"],
 							"properties": {
 								"count": {
-									"type": "integer",
+									"description": "How many clusters. Treated as at least 1.",
+									"format": "uint",
 									"minimum": 0,
-									"description": "How many clusters. Treated as at least 1."
+									"type": "integer"
 								},
 								"spread": {
-									"type": "number",
-									"description": "Standard deviation of each cluster, as a fraction of the disc radius."
+									"description": "Standard deviation of each cluster, as a fraction of the disc radius.",
+									"format": "float",
+									"type": "number"
 								}
-							}
+							},
+							"required": [
+								"count",
+								"spread"
+							],
+							"type": "object"
 						}
-					}
+					},
+					"required": [
+						"Clusters"
+					],
+					"title": "Clusters",
+					"type": "object"
 				}
 			]
 		},
-		"velocityStrategy": {
+		"SimulationConfig": {
+			"additionalProperties": false,
+			"description": "Pacing of the simulation thread. It runs on its own clock, so none of this is tied to the display refresh rate.",
+			"properties": {
+				"collisions": {
+					"allOf": [
+						{
+							"$ref": "#/definitions/CollisionStrategy"
+						}
+					],
+					"default": "Merge",
+					"description": "What a tick does about particles that have run into each other."
+				},
+				"gravitationalConstant": {
+					"default": 4.0,
+					"description": "Gravitational constant the force between two particles is scaled by. Deliberately not the real 6.674e-11 - the world runs in arbitrary units, so this is the dial for how hard the cloud pulls on itself.",
+					"format": "float",
+					"type": "number"
+				},
+				"maxCatchUpTicks": {
+					"default": 5,
+					"description": "Most ticks run back to back when the thread has fallen behind. Past this the backlog is dropped and the simulation runs slower than real time instead of spiralling.",
+					"format": "uint32",
+					"minimum": 1,
+					"type": "integer"
+				},
+				"method": {
+					"allOf": [
+						{
+							"$ref": "#/definitions/SimulationMethod"
+						}
+					],
+					"default": "Naive",
+					"description": "Which algorithm a tick uses. They all model the same physics and differ only in what they cost and how exact they are."
+				},
+				"tickRate": {
+					"default": 60.0,
+					"description": "Ticks per second. Also fixes the dt every tick integrates with, so changing it changes the physics resolution, not just the pace.",
+					"exclusiveMinimum": 0.0,
+					"format": "float",
+					"type": "number"
+				}
+			},
+			"type": "object"
+		},
+		"SimulationMethod": {
+			"description": "How a tick works out the forces acting on each particle.",
+			"oneOf": [
+				{
+					"const": "Naive",
+					"description": "Every particle against every other one. Exact, and the cost per tick grows with the square of the particle count.",
+					"type": "string"
+				},
+				{
+					"const": "BarnesHut",
+					"description": "A quadtree of the world, so a distant clump of particles is pulled on as if it were one mass at its centre. Approximate, and the cost per tick grows close to linearly with the particle count.",
+					"type": "string"
+				},
+				{
+					"const": "Multipole",
+					"description": "The same tree, but a clump is summarised by a series expansion rather than a single mass, so the approximation holds far closer in for the same amount of work. Costliest to build, cheapest per particle.",
+					"type": "string"
+				}
+			]
+		},
+		"UiConfig": {
+			"additionalProperties": false,
+			"description": "The on-screen overlay. Drawn as its own pass on top of the scene, in physical pixels, so none of it moves when you pan or zoom.",
+			"properties": {
+				"fontPath": {
+					"default": null,
+					"description": "Absolute path to a .ttf or .otf file. Forward slashes work on Windows too, and save you escaping every backslash. Null - or a path that won't load - falls back to JetBrains Mono, which ships with the app.",
+					"type": [
+						"string",
+						"null"
+					]
+				},
+				"fontSize": {
+					"default": 14.0,
+					"description": "Text height in logical pixels. Multiplied by the display scale factor before the glyphs are rasterised, so it stays the same physical size on a hi-dpi screen.",
+					"format": "float",
+					"minimum": 4.0,
+					"type": "number"
+				},
+				"showManual": {
+					"default": true,
+					"description": "Whether the controls list - drag, wheel, space, arrows, esc - is drawn under the playback state in the top-right panel. The playback state itself is always shown.",
+					"type": "boolean"
+				},
+				"showStats": {
+					"default": true,
+					"description": "Whether the top-left panel - particle count, tick, fps, tps, zoom, pan - is drawn.",
+					"type": "boolean"
+				}
+			},
+			"type": "object"
+		},
+		"Vec2": {
+			"additionalProperties": false,
+			"description": "The two components of anything planar - a position, a velocity, a size, a window resolution.",
+			"properties": {
+				"x": {
+					"description": "Horizontal component.",
+					"format": "float",
+					"type": "number"
+				},
+				"y": {
+					"description": "Vertical component.",
+					"format": "float",
+					"type": "number"
+				}
+			},
+			"required": [
+				"x",
+				"y"
+			],
+			"type": "object"
+		},
+		"VelocityStrategy": {
 			"oneOf": [
 				{
 					"const": "Stationary",
-					"description": "Everything starts at rest."
+					"description": "Everything starts at rest.",
+					"type": "string"
 				},
 				{
-					"type": "object",
-					"title": "CommonVector",
-					"description": "Every particle starts with the same velocity.",
 					"additionalProperties": false,
-					"required": ["CommonVector"],
+					"description": "Every particle starts with the same velocity.",
 					"properties": {
 						"CommonVector": {
-							"type": "object",
 							"additionalProperties": false,
-							"required": ["velocity"],
 							"properties": {
 								"velocity": {
-									"type": "array",
-									"minItems": 2,
-									"maxItems": 2,
-									"items": { "type": "number" },
-									"description": "[x, y] velocity in world units."
+									"allOf": [
+										{
+											"$ref": "#/definitions/Vec2"
+										}
+									],
+									"description": "Velocity in world units."
 								}
-							}
+							},
+							"required": [
+								"velocity"
+							],
+							"type": "object"
 						}
-					}
+					},
+					"required": [
+						"CommonVector"
+					],
+					"title": "CommonVector",
+					"type": "object"
 				},
 				{
-					"type": "object",
-					"title": "Random",
-					"description": "Random direction, with speed drawn from 0 up to max_speed.",
 					"additionalProperties": false,
-					"required": ["Random"],
+					"description": "Random direction, with speed drawn from 0 up to max_speed.",
 					"properties": {
 						"Random": {
-							"type": "object",
 							"additionalProperties": false,
-							"required": ["max_speed"],
 							"properties": {
 								"max_speed": {
-									"type": "number",
-									"description": "Upper bound on the initial speed."
+									"description": "Upper bound on the initial speed.",
+									"format": "float",
+									"type": "number"
 								}
-							}
+							},
+							"required": [
+								"max_speed"
+							],
+							"type": "object"
 						}
-					}
+					},
+					"required": [
+						"Random"
+					],
+					"title": "Random",
+					"type": "object"
 				},
 				{
-					"type": "object",
-					"title": "Orbital",
-					"description": "Perpendicular to the centre, giving the cloud a net rotation.",
 					"additionalProperties": false,
-					"required": ["Orbital"],
+					"description": "Perpendicular to the centre, giving the cloud a net rotation.",
 					"properties": {
 						"Orbital": {
-							"type": "object",
 							"additionalProperties": false,
-							"required": ["angular_speed"],
 							"properties": {
 								"angular_speed": {
-									"type": "number",
-									"description": "Radians per unit time. Negative spins the other way."
+									"description": "Radians per unit time. Negative spins the other way.",
+									"format": "float",
+									"type": "number"
 								}
-							}
+							},
+							"required": [
+								"angular_speed"
+							],
+							"type": "object"
 						}
-					}
+					},
+					"required": [
+						"Orbital"
+					],
+					"title": "Orbital",
+					"type": "object"
 				},
 				{
-					"type": "object",
-					"title": "Radial",
-					"description": "Straight out from the centre, for an explosion. Particles exactly at the centre get a random direction instead.",
 					"additionalProperties": false,
-					"required": ["Radial"],
+					"description": "Straight out from the centre, for an explosion. Particles exactly at the centre get a random direction instead.",
 					"properties": {
 						"Radial": {
-							"type": "object",
 							"additionalProperties": false,
-							"required": ["speed"],
 							"properties": {
 								"speed": {
-									"type": "number",
-									"description": "Outward speed. Negative collapses inward instead."
+									"description": "Outward speed. Negative collapses inward instead.",
+									"format": "float",
+									"type": "number"
 								}
-							}
+							},
+							"required": [
+								"speed"
+							],
+							"type": "object"
 						}
-					}
+					},
+					"required": [
+						"Radial"
+					],
+					"title": "Radial",
+					"type": "object"
 				}
 			]
 		},
-		"massStrategy": {
-			"oneOf": [
-				{
-					"type": "object",
-					"title": "Constant",
-					"description": "Every particle gets the same mass.",
-					"additionalProperties": false,
-					"required": ["Constant"],
-					"properties": {
-						"Constant": {
-							"type": "object",
-							"additionalProperties": false,
-							"required": ["value"],
-							"properties": {
-								"value": {
-									"type": "number",
-									"description": "Mass for every particle. Negative values are clamped to 0."
-								}
-							}
-						}
-					}
+		"WindowConfig": {
+			"additionalProperties": false,
+			"description": "Size and behaviour of the OS window.",
+			"properties": {
+				"height": {
+					"default": 720.0,
+					"description": "Window height in logical pixels.",
+					"format": "float",
+					"type": "number"
 				},
-				{
-					"type": "object",
-					"title": "Random",
-					"description": "Mass drawn uniformly from a range.",
-					"additionalProperties": false,
-					"required": ["Random"],
-					"properties": {
-						"Random": {
-							"type": "object",
-							"additionalProperties": false,
-							"required": ["min", "max"],
-							"properties": {
-								"min": {
-									"type": "number",
-									"description": "Inclusive lower bound."
-								},
-								"max": {
-									"type": "number",
-									"description": "Exclusive upper bound. Must be above min."
-								}
-							}
-						}
-					}
+				"resizable": {
+					"default": true,
+					"description": "Whether the window can be resized by dragging its edges.",
+					"type": "boolean"
+				},
+				"width": {
+					"default": 1280.0,
+					"description": "Window width in logical pixels.",
+					"format": "float",
+					"type": "number"
 				}
-			]
+			},
+			"type": "object"
+		},
+		"ZoomConfig": {
+			"additionalProperties": false,
+			"description": "Scroll-wheel zoom.",
+			"properties": {
+				"enable": {
+					"default": true,
+					"description": "Whether the scroll wheel zooms at all. When false the other keys here are inert.",
+					"type": "boolean"
+				},
+				"initial": {
+					"default": 10.0,
+					"description": "Zoom factor the camera starts at.",
+					"format": "float",
+					"type": "number"
+				},
+				"max": {
+					"default": 10000.0,
+					"description": "Upper clamp on the zoom factor.",
+					"format": "float",
+					"type": "number"
+				},
+				"min": {
+					"default": 0.10000000149011612,
+					"description": "Lower clamp on the zoom factor.",
+					"format": "float",
+					"type": "number"
+				},
+				"step": {
+					"default": 1.100000023841858,
+					"description": "Multiplier applied per scroll line: new zoom = zoom * step^lines. At or below 1 this inverts or freezes zooming.",
+					"format": "float",
+					"type": "number"
+				}
+			},
+			"type": "object"
 		}
-	}
+	},
+	"description": "Every key is optional. Anything missing or invalid falls back to its own default, so one bad entry never costs you the rest of the file.",
+	"properties": {
+		"$schema": {
+			"description": "Path to this schema. Ignored by the loader.",
+			"type": "string"
+		},
+		"colors": {
+			"$ref": "#/definitions/ColorsConfig"
+		},
+		"pan": {
+			"$ref": "#/definitions/PanConfig"
+		},
+		"particles": {
+			"$ref": "#/definitions/ParticlesConfig"
+		},
+		"simulation": {
+			"$ref": "#/definitions/SimulationConfig"
+		},
+		"ui": {
+			"$ref": "#/definitions/UiConfig"
+		},
+		"window": {
+			"$ref": "#/definitions/WindowConfig"
+		},
+		"zoom": {
+			"$ref": "#/definitions/ZoomConfig"
+		}
+	},
+	"title": "Gravity Sim 2D config",
+	"type": "object"
 }

@@ -4,50 +4,34 @@ use std::path::Path;
 use fontdue::{Font, FontSettings};
 
 use crate::color::ColorRGBA;
+use crate::math::Vec2;
 use crate::ui::quad::Quad;
 
-/// The overlay covers printable ASCII and nothing else. It is a debug readout,
-/// not a text engine, so one contiguous range keeps lookup to an array index.
-const FIRST: u32 = 0x20; // space
-const LAST: u32 = 0x7e; // tilde
+const FIRST: u32 = 0x20;
+const LAST: u32 = 0x7e;
 const COUNT: usize = (LAST - FIRST + 1) as usize;
-/// Stand-in for anything outside the range above.
 const MISSING: char = '?';
 
-/// One byte per pixel, so 512 wide is already a multiple of wgpu's 256-byte
-/// row alignment and the upload never needs padded rows.
 const ATLAS_WIDTH: u32 = 512;
-/// An empty pixel between neighbours, so linear filtering at a glyph's edge
-/// can't reach into the one packed next to it.
 const GUTTER: u32 = 1;
 
-/// The font the app falls back on when the config names none, or names one
-/// that won't load. Compiled into the executable rather than read from disk, so
-/// it is there whatever machine the binary lands on, and whatever directory it
-/// is started from.
 const BUNDLED: &[u8] = include_bytes!("../../JetBrains_Mono/JetBrainsMono-VariableFont_wght.ttf");
 const BUNDLED_NAME: &str = "JetBrains Mono (bundled)";
 
-/// Where one glyph sits in the atlas, and how to place it on a line.
 #[derive(Clone, Copy, Default)]
 struct Glyph {
     uv: [f32; 4],
-    size: [f32; 2],
-    /// From the pen position *on the baseline* to the top-left of the bitmap.
-    offset: [f32; 2],
+    size: Vec2,
+    offset: Vec2,
     advance: f32,
 }
 
-/// A parsed font file, still at no particular size.
 pub struct FontFace {
     font: Font,
-    /// Where the face came from - a path, or the name of the bundled one.
     pub source: String,
 }
 
 impl FontFace {
-    /// Never fails. The configured font is a preference; the one it falls back
-    /// to is part of the binary, so there is always a face to draw with.
     pub fn load(configured: Option<&str>) -> Self {
         if let Some(path) = configured {
             match Self::read(Path::new(path)) {
@@ -82,14 +66,10 @@ impl FontFace {
         Font::from_bytes(bytes, FontSettings::default()).map_err(str::to_owned)
     }
 
-    /// Rasterise every covered character at `px` and shelf-pack the results
-    /// into one texture, so the whole overlay draws from a single binding.
     pub fn rasterize(&self, px: f32) -> Atlas {
         let px = px.max(4.0);
 
         let mut glyphs = [Glyph::default(); COUNT];
-        // Only glyphs that actually inked something need atlas space; a space
-        // is pure advance.
         let mut inked: Vec<(usize, Vec<u8>)> = Vec::with_capacity(COUNT);
 
         for index in 0..COUNT {
@@ -98,13 +78,11 @@ impl FontFace {
 
             glyphs[index] = Glyph {
                 uv: [0.0; 4],
-                size: [metrics.width as f32, metrics.height as f32],
-                offset: [
+                size: Vec2::new(metrics.width as f32, metrics.height as f32),
+                offset: Vec2::new(
                     metrics.xmin as f32,
-                    // `ymin` measures up from the baseline to the bottom of the
-                    // bitmap; the overlay places quads by their top edge.
                     -((metrics.ymin + metrics.height as i32) as f32),
-                ],
+                ),
                 advance: metrics.advance_width,
             };
 
@@ -113,14 +91,12 @@ impl FontFace {
             }
         }
 
-        // Shelf packing: fill a row left to right, drop to a new row when the
-        // next glyph won't fit. Cheap, and near-perfect for one font size where
-        // every glyph is roughly the same height.
         let mut placements = Vec::with_capacity(inked.len());
         let (mut pen_x, mut pen_y, mut shelf_height) = (GUTTER, GUTTER, 0);
 
         for (index, _) in &inked {
-            let [width, height] = glyphs[*index].size.map(|value| value as u32);
+            let width = glyphs[*index].size.x as u32;
+            let height = glyphs[*index].size.y as u32;
 
             if pen_x + width + GUTTER > ATLAS_WIDTH {
                 pen_x = GUTTER;
@@ -138,7 +114,8 @@ impl FontFace {
 
         for ((index, bitmap), [x, y]) in inked.iter().zip(&placements) {
             let glyph = &mut glyphs[*index];
-            let [width, glyph_height] = glyph.size.map(|value| value as u32);
+            let width = glyph.size.x as u32;
+            let glyph_height = glyph.size.y as u32;
 
             for row in 0..glyph_height {
                 let source = (row * width) as usize;
@@ -171,11 +148,9 @@ impl FontFace {
     }
 }
 
-/// Every covered glyph at one size, packed into a single coverage texture.
 pub struct Atlas {
     pub width: u32,
     pub height: u32,
-    /// One byte of coverage per pixel, row-major.
     pub pixels: Vec<u8>,
     pub ascent: f32,
     pub line_height: f32,
@@ -194,30 +169,26 @@ impl Atlas {
         self.glyphs[index as usize]
     }
 
-    /// Width the line will occupy, in physical pixels.
     pub fn measure(&self, text: &str) -> f32 {
         text.chars()
             .map(|character| self.glyph(character).advance)
             .sum()
     }
 
-    /// Append one line of text. `origin` is the top-left of the line box, so
-    /// callers stack lines by [`Atlas::line_height`] and never think in
-    /// baselines.
-    pub fn push_line(&self, quads: &mut Vec<Quad>, origin: [f32; 2], text: &str, color: ColorRGBA) {
-        let baseline = origin[1] + self.ascent;
-        let mut pen = origin[0];
+    pub fn push_line(&self, quads: &mut Vec<Quad>, origin: Vec2, text: &str, color: ColorRGBA) {
+        let baseline = origin.y + self.ascent;
+        let mut pen = origin.x;
 
         for character in text.chars() {
             let glyph = self.glyph(character);
 
-            if glyph.size[0] > 0.0 && glyph.size[1] > 0.0 {
+            if glyph.size.x > 0.0 && glyph.size.y > 0.0 {
                 quads.push(Quad::glyph(
                     [
-                        pen + glyph.offset[0],
-                        baseline + glyph.offset[1],
-                        glyph.size[0],
-                        glyph.size[1],
+                        pen + glyph.offset.x,
+                        baseline + glyph.offset.y,
+                        glyph.size.x,
+                        glyph.size.y,
                     ],
                     glyph.uv,
                     color,

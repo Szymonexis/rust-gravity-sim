@@ -1,12 +1,12 @@
 use crate::color::{ColorRGBA, ColorRamp, RED, WHITE, YELLOW};
+use crate::config::ColorsConfig;
+use crate::math::Vec2;
 use crate::simulation::Particle;
-
-const MASS_RAMP: ColorRamp = ColorRamp::new(&[(10.0, WHITE), (200.0, YELLOW), (1000.0, RED)]);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Shape {
-    pub center: [f32; 2],
+    pub center: Vec2,
     pub size: f32,
     pub kind: u32,
     pub color: ColorRGBA,
@@ -15,7 +15,7 @@ pub struct Shape {
 impl Shape {
     pub const KIND_CIRCLE: u32 = 0;
 
-    pub fn circle(center: [f32; 2], size: f32, color: ColorRGBA) -> Self {
+    pub fn circle(center: Vec2, size: f32, color: ColorRGBA) -> Self {
         Self {
             center,
             size,
@@ -29,12 +29,18 @@ const _: () = assert!(size_of::<Shape>() == 32);
 
 pub struct Scene {
     pub shapes: Vec<Shape>,
+    mass_ramp: ColorRamp,
 }
 
 impl Scene {
-    pub fn init(particles: &[Particle]) -> Self {
+    pub fn init(particles: &[Particle], colors: &ColorsConfig) -> Self {
         let mut scene = Self {
             shapes: Vec::with_capacity(particles.len()),
+            mass_ramp: ColorRamp::new(vec![
+                (colors.white, WHITE),
+                (colors.yellow, YELLOW),
+                (colors.red, RED),
+            ]),
         };
         scene.sync(particles);
         scene
@@ -46,7 +52,7 @@ impl Scene {
             Shape::circle(
                 *particle.position(),
                 particle.radius() * 2.0,
-                MASS_RAMP.sample(*particle.mass()),
+                self.mass_ramp.sample(*particle.mass()),
             )
         }));
     }

@@ -1,14 +1,13 @@
 use crate::gpu::context::GpuContext;
 use crate::gpu::scene::Shape;
+use crate::math::Vec2;
 use crate::view::Camera;
 
-/// Mirrored by `Globals` in shader.wgsl. Nothing checks the two agree - if they
-/// drift apart the shader silently reads the wrong offsets.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Globals {
-    resolution: [f32; 2],
-    pan: [f32; 2],
+    resolution: Vec2,
+    pan: Vec2,
     zoom: f32,
     _pad: f32,
 }
@@ -136,8 +135,6 @@ impl Renderer {
         }
     }
 
-    /// Clears the target and fills it, so this has to be the first pass of the
-    /// frame. Overlays draw into the same encoder afterwards.
     pub fn draw(
         &self,
         ctx: &GpuContext,

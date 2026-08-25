@@ -1,14 +1,13 @@
 use crate::gpu::context::GpuContext;
+use crate::math::Vec2;
 use crate::ui::font::Atlas;
 use crate::ui::quad::Quad;
 
-/// Mirrored by `Globals` in ui.wgsl. Nothing checks the two agree - if they
-/// drift apart the shader silently reads the wrong offsets.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Globals {
-    resolution: [f32; 2],
-    _pad: [f32; 2],
+    resolution: Vec2,
+    _pad: Vec2,
 }
 
 pub struct UiRenderer {
@@ -128,9 +127,6 @@ impl UiRenderer {
                     compilation_options: Default::default(),
                     targets: &[Some(wgpu::ColorTargetState {
                         format: ctx.config.format,
-                        // Glyph edges are partial coverage and the plates are
-                        // deliberately see-through, so unlike the scene this
-                        // pass has to blend rather than overwrite.
                         blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
@@ -155,8 +151,6 @@ impl UiRenderer {
         }
     }
 
-    /// Swap in a freshly rasterised atlas, after the font size or the display's
-    /// scale factor changed.
     pub fn set_atlas(&mut self, ctx: &GpuContext, atlas: &Atlas) {
         self.atlas_view = upload_atlas(ctx, atlas);
         self.rebuild_bind_group(&ctx.device);
@@ -179,14 +173,12 @@ impl UiRenderer {
 
         let globals = Globals {
             resolution: ctx.resolution(),
-            _pad: [0.0; 2],
+            _pad: Vec2::ZERO,
         };
         ctx.queue
             .write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
     }
 
-    /// Draws on top of whatever is already in the target, so this has to run
-    /// after the scene pass has cleared and filled it.
     pub fn draw(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
         if self.quad_count == 0 {
             return;
@@ -248,8 +240,6 @@ fn upload_atlas(ctx: &GpuContext, atlas: &Atlas) -> wgpu::TextureView {
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        // Coverage, not colour: one byte saying how much of the pixel the
-        // glyph covered.
         format: wgpu::TextureFormat::R8Unorm,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],

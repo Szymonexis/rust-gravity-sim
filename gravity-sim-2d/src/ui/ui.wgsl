@@ -1,8 +1,3 @@
-// The overlay layer. It shares nothing with shader.wgsl on purpose: this one
-// works in physical pixels with the origin in the top-left corner, because
-// that is how you describe a corner-anchored panel, whereas the scene works in
-// world units around a centred origin.
-
 struct Globals {
     resolution: vec2<f32>,
     _pad: vec2<f32>,
@@ -15,16 +10,10 @@ const KIND_RECT: u32 = 0u;
 const KIND_GLYPH: u32 = 1u;
 
 struct Quad {
-    // x, y, width, height - pixels, top-left origin, y growing downwards.
     rect: vec4<f32>,
-    // u0, v0, u1, v1 into the glyph atlas. Ignored by KIND_RECT.
     uv: vec4<f32>,
     color: vec4<f32>,
     kind: u32,
-    // Three scalars, not the vec3<u32> they look like: a vec3 is 16-byte
-    // aligned in WGSL, which would push it to offset 64 and stretch this
-    // struct to 80 bytes while Rust still packs it into 64. Every quad after
-    // the first would then be read from a slightly wrong offset.
     _pad0: u32,
     _pad1: u32,
     _pad2: u32,
@@ -51,8 +40,6 @@ fn vertex_shader_main(
     @builtin(vertex_index) vertex_index: u32,
     @builtin(instance_index) instance_index: u32,
 ) -> VertexShaderOut {
-    // Unit corners rather than the scene's -1..1 ones: a quad here is anchored
-    // by its top-left corner and grown by its size, not by a half-extent.
     var corners = array<vec2<f32>, 6>(
         vec2<f32>(0.0, 0.0),
         vec2<f32>(1.0, 0.0),
@@ -66,7 +53,6 @@ fn vertex_shader_main(
     let corner = corners[vertex_index];
     let pixels = quad.rect.xy + corner * quad.rect.zw;
 
-    // Pixels (y down) to clip space (y up).
     let clip = vec2<f32>(
         pixels.x / globals.resolution.x * 2.0 - 1.0,
         1.0 - pixels.y / globals.resolution.y * 2.0,
@@ -82,15 +68,6 @@ fn vertex_shader_main(
 
 @fragment
 fn fragment_shader_main(in: VertexShaderOut) -> @location(0) vec4<f32> {
-    // The atlas stores coverage, not colour: one channel saying how much of
-    // this pixel the glyph covered. The colour comes from the quad, so the
-    // same atlas draws text in any colour.
-    //
-    // Sampled unconditionally and picked afterwards, rather than sampled
-    // inside an `if`: textureSample needs uniform control flow, because it
-    // works out its mip level by comparing coordinates with the neighbouring
-    // fragments - and neighbours that took the other branch have nothing to
-    // compare against. A solid rect samples one wasted texel and discards it.
     let coverage = textureSample(atlas, atlas_sampler, in.uv).r;
     let alpha = select(1.0, coverage, in.kind == KIND_GLYPH);
 

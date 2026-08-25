@@ -3,8 +3,16 @@ mod grid;
 mod overlap;
 mod sampling;
 
-use crate::config::{GenerationConfig, OverlapStrategy};
+use crate::config::{GenerationConfig, OverlapStrategy, ParticlesConfig};
+use crate::math::Vec2;
 use crate::simulation::Particle;
+
+pub fn build(config: &ParticlesConfig) -> Vec<Particle> {
+    match config {
+        ParticlesConfig::Set(particles) => particles.clone(),
+        ParticlesConfig::Generation(generation) => generate(*generation),
+    }
+}
 
 pub fn generate(config: GenerationConfig) -> Vec<Particle> {
     let mut rng = rand::rng();
@@ -16,7 +24,7 @@ pub fn generate(config: GenerationConfig) -> Vec<Particle> {
                 Particle::new(
                     config.area.from_unit_disc(unit),
                     sampling::mass(config.mass, &mut rng),
-                    [0.0, 0.0],
+                    Vec2::ZERO,
                 )
             })
             .collect();
@@ -29,8 +37,6 @@ pub fn generate(config: GenerationConfig) -> Vec<Particle> {
         overlap::separate(&mut particles, config.area, iterations, padding);
     }
 
-    // Velocities last: Orbital and Radial are derived from the position, so
-    // they have to see where separation actually left each particle.
     for particle in &mut particles {
         let velocity = sampling::velocity(config.velocity, *particle.position(), &mut rng);
         particle.set_velocity(velocity);

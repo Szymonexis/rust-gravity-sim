@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use winit::{dpi::PhysicalSize, event_loop::OwnedDisplayHandle, window::Window};
 
+use crate::math::Vec2;
+
 pub struct GpuContext {
     pub instance: wgpu::Instance,
     pub window: Arc<Window>,
@@ -62,8 +64,8 @@ impl GpuContext {
         }
     }
 
-    pub fn resolution(&self) -> [f32; 2] {
-        [self.config.width as f32, self.config.height as f32]
+    pub fn resolution(&self) -> Vec2 {
+        Vec2::new(self.config.width as f32, self.config.height as f32)
     }
 
     pub fn resize(&mut self, new_size: PhysicalSize<u32>) {

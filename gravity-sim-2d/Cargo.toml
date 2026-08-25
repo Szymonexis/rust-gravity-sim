@@ -9,7 +9,16 @@ env_logger = "0.11.11"
 fontdue = "0.9"
 pollster = "1.0.1"
 rand = "0.10.2"
+schemars = "1.2.2"
 serde = {version = "1.0.229", features = ["derive"]}
 serde_json = "1.0.151"
 wgpu = "30.0.0"
 winit = "0.30.13"
+
+# `build.rs` regenerates app-config.schema.json from the config types, so it
+# needs the same crates the config module itself is built on.
+[build-dependencies]
+bytemuck = {version = "1.25.2", features = ["derive"]}
+schemars = "1.2.2"
+serde = {version = "1.0.229", features = ["derive"]}
+serde_json = "1.0.151"

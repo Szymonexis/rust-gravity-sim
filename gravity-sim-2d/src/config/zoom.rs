@@ -1,13 +1,23 @@
+use schemars::JsonSchema;
 use serde_json::{Map, Value};
 
 use crate::config::partial::{FromJsonObject, leaf, warn_unknown_keys};
 
-#[derive(Debug)]
+/// Scroll-wheel zoom.
+#[derive(Debug, JsonSchema)]
+#[schemars(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct ZoomConfig {
+    /// Whether the scroll wheel zooms at all. When false the other keys here
+    /// are inert.
     pub enable: bool,
+    /// Lower clamp on the zoom factor.
     pub min: f32,
+    /// Upper clamp on the zoom factor.
     pub max: f32,
+    /// Multiplier applied per scroll line: new zoom = zoom * step^lines. At or
+    /// below 1 this inverts or freezes zooming.
     pub step: f32,
+    /// Zoom factor the camera starts at.
     pub initial: f32,
 }
 

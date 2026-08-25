@@ -1,6 +1,7 @@
 use std::f32::consts::PI;
 
 use crate::config::Area;
+use crate::math::Vec2;
 
 impl Area {
     #[inline]
@@ -12,10 +13,9 @@ impl Area {
     }
 
     #[inline]
-    pub fn from_unit_disc(self, p: [f32; 2]) -> [f32; 2] {
+    pub fn from_unit_disc(self, p: Vec2) -> Vec2 {
         let (a, b) = self.semi_axes();
-        let [p0, p1] = p;
-        [p0 * a, p1 * b]
+        Vec2::new(p.x * a, p.y * b)
     }
 
     pub fn surface(self) -> f32 {
@@ -23,19 +23,17 @@ impl Area {
         PI * a * b
     }
 
-    pub fn clamp_inside(self, p: [f32; 2]) -> [f32; 2] {
+    pub fn clamp_inside(self, p: Vec2) -> Vec2 {
         let (a, b) = self.semi_axes();
         if a <= 0.0 || b <= 0.0 {
-            return [0.0, 0.0];
+            return Vec2::ZERO;
         }
 
-        let [x, y] = p;
-        let norm = (x / a) * (x / a) + (y / b) * (y / b);
+        let norm = (p.x / a) * (p.x / a) + (p.y / b) * (p.y / b);
         if norm <= 1.0 {
             return p;
         }
 
-        let scale = norm.sqrt();
-        [x / scale, y / scale]
+        p / norm.sqrt()
     }
 }

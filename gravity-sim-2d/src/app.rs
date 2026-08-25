@@ -47,9 +47,6 @@ impl RateMeter {
         }
     }
 
-    /// Returns whether the rates were refreshed this call. Ticks are signed, so
-    /// a world running backwards reports a negative tick rate rather than
-    /// wrapping around.
     fn sample(&mut self, ticks: i64) -> bool {
         self.frames += 1;
 
@@ -78,23 +75,20 @@ pub struct App<'a> {
     scene: Scene,
     simulation: SimulationHandle,
     rates: RateMeter,
-    /// Loaded before the window exists so a bad path is reported at startup,
-    /// and taken once the gpu context can turn it into an atlas.
     font: Option<FontFace>,
-    /// Where the settings were read from, for the overlay to point at.
     config_file: Option<&'a str>,
 }
 
 impl<'a> App<'a> {
     pub fn new(config: &'a AppConfig, config_file: Option<&'a str>) -> Self {
-        let particles = generation::generate(config.generation);
-        let scene = Scene::init(&particles);
+        let particles = generation::build(&config.particles);
+        let scene = Scene::init(&particles, &config.colors);
 
         Self {
-            // From here on the simulation owns the particles and runs on its
-            // own clock. It is already ticking before the window exists, and
-            // keeps ticking while the window is minimised or occluded.
-            simulation: SimulationHandle::spawn(config.simulation, World::new(particles)),
+            simulation: SimulationHandle::spawn(
+                config.simulation,
+                World::new(particles, config.simulation),
+            ),
             config,
             gpu: None,
             camera: Camera::new(config),
@@ -110,12 +104,8 @@ impl<'a> App<'a> {
         match code {
             KeyCode::Escape => event_loop.exit(),
 
-            // Held keys repeat, which is what you want for winding the speed up
-            // but not for a toggle.
             KeyCode::Space if !repeat => self.simulation.toggle_pause(),
 
-            // Paused, the arrows walk the world by hand; running, they set how
-            // fast and which way it walks itself.
             KeyCode::ArrowRight => {
                 if self.simulation.is_paused() {
                     self.simulation.step(STEP_TICKS);
@@ -171,8 +161,6 @@ impl<'a> App<'a> {
                 .texture
                 .create_view(&wgpu::TextureViewDescriptor::default());
 
-            // One encoder for both passes: the scene clears the target, the ui
-            // loads it back and draws over the top.
             let mut encoder = gpu
                 .ctx
                 .device
@@ -215,8 +203,6 @@ impl ApplicationHandler for App<'_> {
         let scale = window.scale_factor() as f32;
         let ctx = pollster::block_on(GpuContext::new(window, event_loop.owned_display_handle()));
         let renderer = Renderer::new(&ctx, &self.scene.shapes);
-        // Taken on the first resume; rebuilt from the config on any later one,
-        // which only happens if the window was torn down and brought back.
         let face = self
             .font
             .take()
@@ -254,8 +240,6 @@ impl ApplicationHandler for App<'_> {
 }
 
 impl App<'_> {
-    /// The rest of the events, split out only so the borrow of `self.gpu` stays
-    /// inside one arm instead of straddling the whole match.
     fn on_window_event(&mut self, event: WindowEvent) {
         let Some(gpu) = &mut self.gpu else {
             return;

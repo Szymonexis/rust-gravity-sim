@@ -1,3 +1,4 @@
+mod collision;
 mod particle;
 mod runner;
 mod speed;

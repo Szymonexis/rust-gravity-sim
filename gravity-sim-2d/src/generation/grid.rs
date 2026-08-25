@@ -1,10 +1,9 @@
 use crate::config::Area;
+use crate::math::Vec2;
 use crate::simulation::Particle;
 
-/// Cells are never narrower than the widest possible contact distance, which
-/// is what guarantees an overlapping pair lands in the 3x3 block around either.
 pub struct SpatialGrid {
-    origin: [f32; 2],
+    origin: Vec2,
     cell_size: f32,
     columns: usize,
     rows: usize,
@@ -25,7 +24,7 @@ impl SpatialGrid {
         let rows = ((height / cell_size).ceil() as usize + 1).max(1);
 
         Self {
-            origin: [-semi_x, -semi_y],
+            origin: Vec2::new(-semi_x, -semi_y),
             cell_size,
             columns,
             rows,
@@ -44,7 +43,7 @@ impl SpatialGrid {
         }
     }
 
-    pub fn neighbours(&self, position: [f32; 2]) -> impl Iterator<Item = usize> {
+    pub fn neighbours(&self, position: Vec2) -> impl Iterator<Item = usize> {
         let (column, row) = self.cell_of(position);
 
         (-1..=1isize)
@@ -59,9 +58,9 @@ impl SpatialGrid {
             .flat_map(move |cell| self.cells[cell].iter().map(|&i| i as usize))
     }
 
-    fn cell_of(&self, position: [f32; 2]) -> (usize, usize) {
-        let x = ((position[0] - self.origin[0]) / self.cell_size).floor();
-        let y = ((position[1] - self.origin[1]) / self.cell_size).floor();
+    fn cell_of(&self, position: Vec2) -> (usize, usize) {
+        let x = ((position.x - self.origin.x) / self.cell_size).floor();
+        let y = ((position.y - self.origin.y) / self.cell_size).floor();
 
         (
             (x.max(0.0) as usize).min(self.columns - 1),
